@@ -2,7 +2,7 @@
 -- MVP retailers per PRD.md §9 / WORKERS.md §4.
 insert into retailers (slug, name_en, name_ar, base_url, worker_workflow, is_active) values
   ('noon', 'Noon', 'نون', 'https://www.noon.com', 'worker-noon.yml', true),
-  ('amazon_sa', 'Amazon.sa', 'أمازون السعودية', 'https://www.amazon.sa', 'worker-amazon.yml', false),
+  ('amazon_sa', 'Amazon.sa', 'أمازون السعودية', 'https://www.amazon.sa', 'worker-amazon.yml', true),
   ('jarir', 'Jarir Bookstore', 'مكتبة جرير', 'https://www.jarir.com', 'worker-jarir.yml', true),
   ('extra', 'extra', 'اكسترا', 'https://www.extra.com', 'worker-extra.yml', true)
 on conflict (slug) do nothing;
