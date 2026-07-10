@@ -92,20 +92,19 @@ Used to size ambition and validate urgency, not to lock in a launch date.
 
 ### 7.2 Success metrics / KPIs (initial targets — to be revisited quarterly)
 
-| Category | Metric | MVP Target | Y1 Target |
-|---|---|---|---|
-| Coverage | # tracked products | 250K | 5M+ |
-| Coverage | # retailers/workers live | 4 (Amazon.sa, Noon, Jarir, extra) | 10+ retailers, 6+ social/community sources |
-| Freshness | Median price staleness for "hot" (top 5% by popularity) products | < 2 hours | < 30 minutes |
-| Freshness | Median price staleness for long-tail products | < 48 hours | < 24 hours |
-| Engagement | Weekly proactive-alert open rate | 25% | 40%+ |
-| Trust | % of users who don't disable notifications within 30 days | 70% | 85% |
-| Monetization | Affiliate-attributed GMV | tracked, no target | defined post-MVP |
-| Reliability | Platform uptime (user-facing) | 99.5% | 99.9% |
-| Reliability | Worker failure isolation (one worker down ⇒ others unaffected) | 100% | 100% |
-| Cost | Infra cost per 1,000 tracked products / month | baseline established | -30% via smart scheduling |
+> **Revised 2026-07-10:** MVP is personal/limited-scale, not a public launch — targets below reflect that. Y1 targets are kept as the architecture's design ceiling (what Phase 2+ must not block), not a commitment to reach them on any particular date.
 
-These are **placeholders to validate with the founder**, not final commitments — flagged in §17.
+| Category | Metric | MVP Target (personal scale) | Y1 Target (architecture ceiling) |
+|---|---|---|---|
+| Coverage | # tracked products | 1,000–5,000 (founder's own watchlist + a few categories) | 5M+ |
+| Coverage | # retailers/workers live | 3–4 (Amazon.sa, Noon, Jarir, extra) | 10+ retailers, 6+ social/community sources |
+| Freshness | Median price staleness for "hot" (top 5% by popularity) products | < 6 hours (cron-based, not real-time) | < 30 minutes |
+| Freshness | Median price staleness for long-tail products | < 48 hours | < 24 hours |
+| Engagement | Weekly proactive-alert open rate | n/a (single/few users — qualitative "is it useful to me") | 40%+ |
+| Monetization | Affiliate-attributed GMV | none expected (§13) | defined post-MVP |
+| Reliability | Platform uptime (user-facing) | best-effort (free/hobby-tier hosting) | 99.9% |
+| Reliability | Worker failure isolation (one worker down ⇒ others unaffected) | 100% (non-negotiable even at small scale — it's cheap to get right early) | 100% |
+| **Cost** | **Monthly infra spend during MVP** | **as close to $0 as possible; every paid service must be individually justified** | optimized cost/1,000 products, not zero |
 
 ---
 
@@ -199,7 +198,7 @@ Numbered `FR-x` for future traceability into `API.md`/`AI_AGENTS.md`/`WORKERS.md
 | **Availability** | 99.9% uptime target for user-facing services post-V1; background collection degradation must never take down the web/API tier. |
 | **Security** | No plaintext secrets; least-privilege access between services; all user PII encrypted at rest; see `SECURITY.md` (Phase to follow). |
 | **Compliance** | Must comply with Saudi PDPL (SDAIA-enforced) for any personal data (users, and any personal data incidentally present in scraped reviews/social content — e.g., reviewer names/handles). **Decided (2026-07-10):** hosting outside KSA is acceptable for MVP, provided PDPL-compliant technical/organizational safeguards are in place (see §17 Q1 resolution) — this unblocks Phase 2/3 region selection (e.g., Supabase/Railway nearest compliant region) without requiring in-Kingdom hosting at launch. |
-| **Cost Efficiency** | Collection frequency must scale with product popularity/volatility, not run uniformly — this is a core cost lever, detailed functionally in `WORKERS.md`/scheduler design (Phase 6/7). |
+| **Cost Efficiency** | Collection frequency must scale with product popularity/volatility, not run uniformly — this is a core cost lever, detailed functionally in `WORKERS.md`/scheduler design (Phase 6/7). **MVP deployment constraint (2026-07-10):** at personal/limited MVP scale, prefer the cheapest option that is genuinely good over the "best-in-class" managed option — free/hobby tiers, serverless-first, and consolidating services (e.g., one database doing relational + search + vector) over running many always-on paid services. The architecture must still remain swappable to premium/dedicated services at scale (see `ARCHITECTURE.md`), so this is a deployment choice, not a design compromise. |
 | **Maintainability** | Monorepo, typed codebase end-to-end (TypeScript), documented interfaces between agents/workers/services so any one piece can be rebuilt without touching the rest. |
 | **Auditability** | Every AI-generated recommendation must be traceable to the data it used (for debugging, for user trust, and for regulatory defensibility). |
 | **Legal/ToS risk** | Data collection from third-party sites carries ToS and legal risk (rate-limiting, robots.txt respect, no circumvention of technical access controls) — approach must be documented per-source in `WORKERS.md` and reviewed, not assumed. |
@@ -265,10 +264,10 @@ Founder decisions recorded 2026-07-10:
 1. **Data residency — RESOLVED.** Hosting outside KSA is acceptable for MVP, provided PDPL-compliant technical/organizational safeguards are implemented (encryption, access controls, documented lawful basis, breach process). No in-Kingdom hosting requirement at launch. Applied in §11 (Compliance row). Data-residency posture should be revisited if/when regional expansion (§9 Phase D) or enterprise/government customers (§13.5 B2B) raise the bar.
 2. **Affiliate program access — RESOLVED.** No affiliate/partner relationships with Amazon.sa, Noon, Jarir, or extra exist today. MVP ships with no live affiliate monetization; applications open in parallel with/after MVP build. Applied in §13. Phase 3 infra-cost planning must assume **zero affiliate revenue** as the baseline case, not a fallback.
 3. **MVP notification channel — RESOLVED.** Push + email only for MVP. WhatsApp Business API and SMS are explicit, scoped V1 candidates (not deferred indefinitely — flag for `ROADMAP.md`). Applied in §10.3 (FR-16).
-4. **Success metric ownership — STILL OPEN.** The KPI targets in §7.2 remain proposed placeholders, not yet explicitly confirmed. Carried forward; will be revisited at the start of Phase 2 rather than blocking it, since these are tuning targets, not architecture-determining constraints.
+4. **Success metric ownership — RESOLVED (2026-07-10, revised).** MVP usage is **personal/limited scale, not public-launch scale** — founder is cost-sensitive and wants the cheapest option that is still genuinely good, not the "best-in-class" managed option. §7.2 MVP-column targets are revised down accordingly (see updated table). The **Y1 targets and the underlying architecture remain unchanged** — the system must still be *designed* to scale to millions of products/users without a rewrite; we are only choosing a minimal-cost *deployment* of that same architecture for MVP (e.g., free/hobby tiers, serverless-first, fewer always-on services). This directly shapes Phase 2's infrastructure choices (see `ARCHITECTURE.md`, cost section).
 5. **Monorepo/tech-stack constraints — RESOLVED.** Treated as the default direction, not a locked mandate: Phase 2 may propose a concretely better alternative for any component, provided it is explicitly compared and justified in `ARCHITECTURE.md` rather than swapped silently. Applied in the governance note at the top of this document.
 
-**Status:** Q1, Q2, Q3, and Q5 are resolved. Q4 remains open but is non-blocking. Phase 2 (`ARCHITECTURE.md`) may now proceed.
+**Status:** All five open questions are now resolved. Phase 2 (`ARCHITECTURE.md`) may now proceed.
 
 ---
 
