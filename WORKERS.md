@@ -3,7 +3,7 @@
 
 | | |
 |---|---|
-| **Status** | Draft v1.0 — Awaiting founder review |
+| **Status** | v1.1 — Approved (TikTok deferral decided 2026-07-10) |
 | **Phase** | 6 **and** 7 of 10 — Workers **and** Schedulers |
 | **Last updated** | 2026-07-10 |
 | **Depends on** | `ARCHITECTURE.md` §3.4/§3.5 · `DATABASE.md` · `AI_AGENTS.md` |
@@ -107,7 +107,7 @@ Per PRD §9, these are explicitly **V2 scope**, built last and deliberately — 
 | **Reddit Worker** | Official Reddit API (OAuth) | Has a workable free tier for low-volume, non-commercial-scale read access — matches this platform's usage pattern; scraping Reddit directly is unnecessary and riskier than using the API that exists for exactly this purpose |
 | **YouTube Worker** | Official YouTube Data API | Free daily quota (10,000 units) comfortably covers the daily cadence in §3.2 for searching/reading video metadata and comments relevant to tracked products |
 | **X Worker** | Official X API, **free/basic tier only** | X's API access has become the most rate- and cost-constrained of the four social sources — this worker is scoped to whatever the free/basic tier actually allows, not sized against an aspirational volume; if the free tier proves too thin to be useful, this worker stays paused rather than falling back to scraping X directly |
-| **TikTok Worker** | **Lowest priority, most conservative** | No robust official free API exists for this use case. Recommendation: **defer this worker past V2** until either an official API path exists or the founder explicitly decides scraping TikTok is worth the elevated ToS risk relative to its value — flagged for an explicit decision, not defaulted into scraping (see §8). |
+| **TikTok Worker** | **Deferred indefinitely — decided 2026-07-10** | No robust official free API exists for this use case, and it's V2 scope with the lowest value-to-risk ratio of the four social sources. **Not built** — no scraping fallback either — until an official API path exists that makes this consistent with the same "prefer official APIs" stance already applied to Reddit/YouTube/X. Revisit only as a deliberate future decision if TikTok becomes clearly important to the product (e.g., a primary venue for Saudi shopping discussion), not as a default addition. |
 
 All four write into the same `reviews` table (`source` column, `DATABASE.md` §5) and feed the Social Intelligence Agent (`AI_AGENTS.md` §3.10) — no schema difference between them, only ingestion-method difference.
 
@@ -163,14 +163,13 @@ Ties together `PRD.md`'s NFR "Legal/ToS risk" into concrete worker behavior:
 
 ---
 
-## 10. Open Questions for Phase 8
+## 10. Resolved (2026-07-10)
 
-1. **TikTok Worker: build it (accepting elevated ToS risk) or defer indefinitely until an official API path exists?** (§6) This is the one genuine judgment call in this document — everything else here follows directly from prior decisions.
-2. Coupon-aggregator site list (§5) — the specific set of third-party Saudi coupon sites to include, beyond retailers' own promotion pages, is an implementation-time detail better decided when the Coupon Worker is actually built, not speculated on now.
+1. **TikTok Worker: deferred indefinitely** — see §6.
+2. Coupon-aggregator site list (§5) remains an implementation-time detail, decided when the Coupon Worker is actually built, not speculated on now.
 
 ---
 
 ## 11. Next Steps
 
-1. Founder review — approve or annotate, especially §4's Amazon risk framing and §6's TikTok question.
-2. Upon approval → **Phase 8: `API.md`** — the API surface (`/api/scheduler/due` formalized here, plus the user-facing and admin endpoints) that workers, agents, and the web app all call.
+Phase 6+7 is complete and approved. Next: **Phase 8: `API.md`** — the API surface (`/api/scheduler/due` formalized here, plus the user-facing and admin endpoints) that workers, agents, and the web app all call.
