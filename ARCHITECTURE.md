@@ -3,7 +3,7 @@
 
 | | |
 |---|---|
-| **Status** | v1.1 — Approved (deviations, repo visibility, admin layout confirmed 2026-07-10, §8) |
+| **Status** | v1.2 — Approved and complete (all decisions in §7/§8/§8b resolved 2026-07-10) |
 | **Phase** | 2 of 10 — System Architecture |
 | **Last updated** | 2026-07-10 |
 | **Depends on** | `PRD.md` (Phase 1, approved — all §17 questions resolved) |
@@ -218,7 +218,7 @@ Every verdict references the `change_event` and data snapshot that produced it �
 | Supabase free project pauses after 7 days of inactivity | A request or scheduled worker hits a paused DB, times out | Self-mitigating: workers touch the DB every 15–30 min at MVP cadence. Add a scheduled healthcheck ping as backstop. |
 | GitHub Actions cron: 5-min minimum, UTC-rooted, up to 5–30 min delay under load | Cannot guarantee true real-time freshness; Y1 target of <30 min staleness is not reachable on pure cron dispatch | Treat as coarse dispatcher only (§3.5); document MVP freshness target as best-effort/cron-based (already reflected in PRD §7.2); graduating past this requires a real scheduler service later |
 | ~~GitHub Actions private-repo free minutes (2,000/mo) can be exhausted~~ | — | **Resolved (§8.2):** repo is public, so Actions minutes are unlimited/free — no longer a risk |
-| OpenRouter free-model tier caps at **50 requests/day** (or 20/min) on an unfunded account | AI re-analysis could stall mid-day on a busy day (many watchlist changes / a big price-drop event), delaying verdicts and notifications | Gate all AI calls behind FR-14's change-detection gate (never call on a timer); queue overflow requests to the next day rather than failing silently; strongly consider the one-time non-recurring $10 OpenRouter top-up (raises cap to 1,000/day, still $0 recurring) — flagged as a decision in §8 |
+| OpenRouter free-model tier caps at **50 requests/day** (or 20/min) — accepted as-is per §8b (no top-up) | AI re-analysis could stall mid-day on a busy day (many watchlist changes / a big price-drop event), delaying verdicts and notifications | Gate all AI calls behind FR-14's change-detection gate (never call on a timer); queue overflow requests into the next day's quota window rather than failing silently — raw data (price/coupon/review) is still collected and stored on schedule regardless, only AI verdict generation is deferred (§8b). The $10 top-up remains available as a zero-risk lever if this proves consistently binding. |
 | Free open-weight models (OpenRouter `:free` tier) have lower availability/uptime guarantees than a paid API, and can be deprecated or swapped by OpenRouter with little notice | A single free model going down or disappearing could silently degrade verdict quality or break the AI layer | §3.6's 2–3-model fallback chain within `packages/ai` — if the primary free model errors or times out, automatically retry against the next model in the chain before failing |
 | Vercel Hobby: 60s function timeout, hard caps, no overage billing | Any accidentally-long request hard-fails; hitting a cap takes the site offline until next month/upgrade | Keep AI calls and scraping entirely off the user-request path (already true per §3.10 — they run via the async change-detection flow, not inline) |
 | Vercel Hobby is non-commercial-use only | ToS violation risk once monetization (§13 PRD) goes live | Explicit gate: upgrade to Pro before/at the same time as any affiliate/sponsored feature ships |
@@ -282,14 +282,12 @@ services/        scheduler · notification · search · recommendation
 
 ---
 
-## 8b. Still Open — Needs a Decision Before Phase 3
+## 8b. Resolved (2026-07-10)
 
-1. **OpenRouter one-time top-up.** Spend a single, non-recurring $10 on OpenRouter now (raises the free-model daily cap from 50 → 1,000 requests/day, permanently, with no subscription) — or start on the pure $0 tier (50 req/day) and only pay if the cap actually becomes a problem? Given MVP is personal-scale, 50/day may well be enough, but it's tight if FR-14 change events cluster (e.g., a multi-product price-drop day). This is the last dollar-figure decision before Phase 3.
+1. **OpenRouter top-up: declined for now.** MVP starts on the pure $0 tier — **50 requests/day, 20/min**, no purchase of any kind. This makes the platform's total cost genuinely **$0, with no exceptions**, matching the founder's stated preference. **Consequence made explicit:** the AI layer must degrade gracefully at this cap, not fail loudly — `packages/ai` needs a request budget/queue so that once 50 requests are used for the day, further `change_events` wait for the next day's quota window rather than erroring or dropping data (the underlying price/coupon/review data is still collected and stored on schedule regardless — only the AI *verdict* generation is deferred). The one-time $10 top-up remains a documented, zero-risk lever to revisit later if the 50/day cap is consistently binding — no other change needed to pick it up when/if that day comes.
 
 ---
 
 ## 9. Next Steps
 
-1. Founder review of this architecture — approve or annotate, especially §7.
-2. Answer the §8b open question.
-3. Upon approval → **Phase 3: Infrastructure design** (concrete deployment config, environment variables, secrets management, CI/CD pipeline shape, monitoring/alerting for the free-tier risk table in §6).
+All decisions in §7, §8, and §8b are resolved and approved. **Phase 2 is complete.** Next: **Phase 3 — Infrastructure design** (concrete deployment config, environment variables, secrets management, CI/CD pipeline shape, and monitoring/alerting for the free-tier risk table in §6 — including the OpenRouter 50-req/day budget/queue behavior from §8b).
