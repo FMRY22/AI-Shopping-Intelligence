@@ -4,6 +4,9 @@
  * signal-from-data-comparison task that plain code handles well and for
  * free, keeping the scarce OpenRouter budget for genuine reasoning tasks.
  *
+ * Retailer-agnostic -- lives in packages/scraper-core (not a single
+ * worker) since every retailer worker needs the same pricing signal logic.
+ *
  * change_events emission (the FR-14 gate that triggers Deal Hunter) is
  * deferred to the AI-agents implementation slice, since the `change_events`
  * table doesn't exist yet in this first collection-pipeline slice -- see
@@ -34,4 +37,10 @@ export function computeVolatility(recentPrices: number[]): number {
 
 export function checkIntervalFor(volatility: number): string {
   return volatility >= VOLATILITY_INTERVAL_CUTOFF ? HIGH_VOLATILITY_INTERVAL : LOW_VOLATILITY_INTERVAL;
+}
+
+export function intervalToMs(interval: string): number {
+  const match = /^(\d+)\s*hours?$/.exec(interval.trim());
+  const hours = match?.[1] ? Number.parseInt(match[1], 10) : 24;
+  return hours * 60 * 60 * 1000;
 }

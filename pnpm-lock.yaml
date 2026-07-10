@@ -67,6 +67,12 @@ importers:
 
   packages/scraper-core:
     dependencies:
+      '@repo/database':
+        specifier: workspace:*
+        version: link:../database
+      '@repo/shared':
+        specifier: workspace:*
+        version: link:../shared
       playwright:
         specifier: ^1.49.1
         version: 1.61.1
@@ -87,17 +93,30 @@ importers:
         specifier: ^5.7.2
         version: 5.9.3
 
-  workers/noon:
+  workers/jarir:
     dependencies:
-      '@repo/database':
-        specifier: workspace:*
-        version: link:../../packages/database
       '@repo/scraper-core':
         specifier: workspace:*
         version: link:../../packages/scraper-core
-      '@repo/shared':
+      playwright:
+        specifier: ^1.49.1
+        version: 1.61.1
+    devDependencies:
+      '@types/node':
+        specifier: ^22.10.2
+        version: 22.20.1
+      tsx:
+        specifier: ^4.19.2
+        version: 4.23.0
+      typescript:
+        specifier: ^5.7.2
+        version: 5.9.3
+
+  workers/noon:
+    dependencies:
+      '@repo/scraper-core':
         specifier: workspace:*
-        version: link:../../packages/shared
+        version: link:../../packages/scraper-core
       playwright:
         specifier: ^1.49.1
         version: 1.61.1

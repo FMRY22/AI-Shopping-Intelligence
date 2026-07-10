@@ -2,10 +2,10 @@ import { runRetailerWorker, log } from "@repo/scraper-core";
 import { scrapeProductPage } from "./scrape";
 import { SEED_PRODUCT_URLS } from "./seed";
 
-const WORKER_NAME = "worker-noon";
+const WORKER_NAME = "worker-jarir";
 
 runRetailerWorker({
-  retailerSlug: "noon",
+  retailerSlug: "jarir",
   workerName: WORKER_NAME,
   seedUrls: SEED_PRODUCT_URLS,
   scrapeProductPage,

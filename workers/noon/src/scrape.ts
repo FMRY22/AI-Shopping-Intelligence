@@ -1,11 +1,6 @@
 import type { Page } from "playwright";
+import type { ScrapedProduct } from "@repo/scraper-core";
 import { NOON_SELECTORS } from "./selectors";
-
-export interface ScrapedProduct {
-  title: string;
-  priceText: string | null;
-  inStock: boolean;
-}
 
 export async function scrapeProductPage(page: Page, url: string): Promise<ScrapedProduct> {
   // "commit" (navigation started, first byte received) rather than
