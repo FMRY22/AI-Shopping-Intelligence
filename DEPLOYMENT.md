@@ -3,7 +3,7 @@
 
 | | |
 |---|---|
-| **Status** | Draft v1.0 — Awaiting founder review |
+| **Status** | v1.1 — Approved and complete (all decisions in §7/§8/§11 resolved 2026-07-10) |
 | **Phase** | 3 of 10 — Infrastructure |
 | **Last updated** | 2026-07-10 |
 | **Depends on** | `PRD.md` (Phase 1) · `ARCHITECTURE.md` (Phase 2, approved, $0/month recurring) |
@@ -147,16 +147,13 @@ Every component is $0 by design (`ARCHITECTURE.md` §4), so "cost monitoring" he
 
 ---
 
-## 11. Open Questions for Phase 4
+## 11. Resolved (2026-07-10)
 
-1. Backup repo naming/ownership — same GitHub account as the main repo, or a dedicated "ops" account? (Low-stakes, defaulting to same account unless you'd rather separate them.)
-
-*(Domain timing — resolved §8: no custom domain for MVP.)*
+1. **Backup repo ownership: same GitHub account** as the main repo (a second private repo on that account, e.g. `ai-shopping-intelligence-backups`, per §7).
+2. **Domain: no custom domain** for MVP — resolved §8.
 
 ---
 
 ## 12. Next Steps
 
-1. Founder review — approve or annotate, especially §7 (backup design is the one genuinely new risk this phase surfaces, since it wasn't covered in `ARCHITECTURE.md`).
-2. Answer §11 if relevant (low-stakes, has a sensible default if skipped).
-3. Upon approval → **Phase 4: `DATABASE.md`** — full schema design (products, price_history, change_events, product_verdicts, watchlists, users, and the popularity/volatility scheduling fields referenced throughout `ARCHITECTURE.md`).
+Phase 3 is complete and approved. Next: **Phase 4: `DATABASE.md`** — full schema design (products, price_history, change_events, product_verdicts, watchlists, users, and the popularity/volatility scheduling fields referenced throughout `ARCHITECTURE.md`).
