@@ -3,7 +3,7 @@
 
 | | |
 |---|---|
-| **Status** | Draft v1.0 — Awaiting founder review, especially §7 (Deviations) |
+| **Status** | v1.1 — Approved (deviations, repo visibility, admin layout confirmed 2026-07-10, §8) |
 | **Phase** | 2 of 10 — System Architecture |
 | **Last updated** | 2026-07-10 |
 | **Depends on** | `PRD.md` (Phase 1, approved — all §17 questions resolved) |
@@ -147,7 +147,7 @@ Included in the Supabase free tier (up to 50,000 MAU), integrates with Postgres 
 Recommended over Nx for MVP: lighter, first-class Vercel integration (same vendor, zero-config remote caching), sufficient for the requested layout:
 
 ```
-apps/            web · admin · api (folded into web/admin as Route Handlers — see §3.1)
+apps/            web (includes /admin route, gated by role — see §8.3; api folded in as Route Handlers, §3.1)
 packages/        ui · shared · database · auth · ai
 workers/         amazon · noon · jarir · extra · coupon · cashback · reddit · x · youtube · tiktok
 services/        scheduler · notification · search · recommendation
@@ -245,15 +245,34 @@ The original brief named: Next.js, React, TypeScript, TailwindCSS, Shadcn UI, **
 ### 7.5 Vercel Hobby's non-commercial ToS
 Not a stack deviation but a constraint worth surfacing here: acceptable today (zero monetization), becomes a required upgrade the moment §13 monetization ships.
 
-**I am treating §7.1–7.4 as needing your explicit go-ahead before Phase 3 (Infrastructure) locks these in** — they're the kind of decision that's expensive to reverse later (data migrations, rewritten workers) if made silently and disagreed with after the fact.
+### 7.6 Decision (2026-07-10): §7.1–7.4 approved, with one explicit condition
+
+Founder approved all four deviations, on the condition that **going cheap must never mean going feature-incomplete** — the free-tier stack must still deliver every PRD functional requirement (FR-1 through FR-23) in full, not a stripped-down MVP feature set. This is now a binding design rule, distinct from the cost trade-offs already documented above:
+
+- What free-tier choices are allowed to cost: **polish, precision, and scale headroom** — e.g., search without typo-tolerance (§7.2), cron-based rather than sub-30-min freshness (§6), best-effort rather than 99.9% uptime (PRD §7.2, deliberately accepted).
+- What free-tier choices are **not** allowed to cost: **any functional capability in the PRD.** Every FR must work end-to-end on this stack — price history (FR-2), fake-discount detection (FR-3), coupon validation (FR-4), cashback (FR-5), review synthesis (FR-12), buy-now-vs-wait verdicts (FR-9), alternative-product suggestions (FR-10), watchlists with standing criteria (FR-15), proactive notifications (FR-16), full price-history charts (FR-17), bilingual RTL UI (FR-19), admin worker-health visibility (FR-21), etc. None of these are cut or deferred by this architecture — they are all buildable on the components chosen in §3; the free tiers constrain *how well/fast*, not *whether*.
+- Where a feature's quality genuinely cannot be delivered on the free tier (none identified yet at MVP's 1,000–5,000-product scale), that must be raised explicitly as a scope conversation, not silently degraded.
+
+This condition is carried forward as a standing constraint into Phases 5–9 (AI Agents, Workers, Schedulers, APIs, UI) — each of those documents must show how its features run on this stack, not assume a richer one.
 
 ---
 
-## 8. Open Questions for Phase 3
+## 8. Decisions Recorded (2026-07-10)
 
-1. Do you approve §7.1–7.4 as described, or want any of them reconsidered (e.g., keep Railway despite the cost floor, for simplicity/statefulness)?
-2. Public vs. private GitHub repo — public unlocks unlimited free Actions minutes but makes source (and scraping logic) visible. Any preference given the personal-scale MVP framing?
-3. Should `apps/admin` exist as a real separate app at MVP, or is a simple `/admin` route inside `apps/web` (gated by auth role) sufficient at this scale — one less app to maintain?
+1. **§7.1–7.4 deviations: approved**, subject to the binding "no feature cut" condition in §7.6.
+2. **Repository visibility: public.** Unlocks unlimited free GitHub Actions minutes for the worker workflows (§3.4), removing the 2,000 min/month private-repo ceiling entirely — the single biggest constraint in §6's risk table is now moot. Trade-off accepted: source code and scraping logic are publicly visible. **Implication for later phases:** `SECURITY.md` (future) must ensure no secrets/API keys/credentials ever live in the repo itself — all secrets go in Vercel/GitHub Actions encrypted environment variables, enforced from the first commit of actual code, not retrofitted.
+3. **`apps/admin` folded into a `/admin` route inside `apps/web`**, gated by an auth role check (Supabase Auth + RLS), rather than a separate deployed app. One fewer app to build, deploy, and maintain at MVP scale; revisit as a standalone app only if admin/ops needs (FR-21–23) outgrow a single route (e.g., needing its own deployment cadence or access model).
+
+Monorepo layout updated accordingly:
+
+```
+apps/            web (includes /admin route)
+packages/        ui · shared · database · auth · ai
+workers/         amazon · noon · jarir · extra · coupon · cashback · reddit · x · youtube · tiktok
+services/        scheduler · notification · search · recommendation
+```
+
+(`apps/api` was already folded into `apps/web`'s Route Handlers per §3.1 — no separate API app exists at MVP.)
 
 ---
 
