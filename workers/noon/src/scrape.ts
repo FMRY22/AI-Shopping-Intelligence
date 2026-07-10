@@ -1,5 +1,5 @@
 import type { Page } from "playwright";
-import type { ScrapedProduct } from "@repo/scraper-core";
+import { textFromFirstMatch, existsAny, type ScrapedProduct } from "@repo/scraper-core";
 import { NOON_SELECTORS } from "./selectors";
 
 export async function scrapeProductPage(page: Page, url: string): Promise<ScrapedProduct> {
@@ -10,13 +10,13 @@ export async function scrapeProductPage(page: Page, url: string): Promise<Scrape
   // wait for the actual elements to appear, which is what we need anyway.
   await page.goto(url, { waitUntil: "commit", timeout: 45_000 });
 
-  const title = (await page.locator(NOON_SELECTORS.title).first().textContent().catch(() => null))?.trim();
+  const title = await textFromFirstMatch(page, NOON_SELECTORS.title);
   if (!title) {
     throw new Error("could not read product title -- selectors.ts may be stale, see its header comment");
   }
 
-  const priceText = (await page.locator(NOON_SELECTORS.price).first().textContent().catch(() => null))?.trim() ?? null;
-  const outOfStockCount = await page.locator(NOON_SELECTORS.outOfStock).count();
+  const priceText = await textFromFirstMatch(page, NOON_SELECTORS.price);
+  const inStock = !(await existsAny(page, NOON_SELECTORS.outOfStock));
 
-  return { title, priceText, inStock: outOfStockCount === 0 };
+  return { title, priceText, inStock };
 }

@@ -8,16 +8,20 @@
  * documents this constraint explicitly), so noon.com could not be opened
  * to inspect its current DOM.
  *
- * Each entry is a comma-separated CSS selector list (first match wins) to
- * add some resilience to markup variation -- but treat this whole file as
- * the one part of this worker that needs a quick manual check (open a real
- * product page, confirm these match) before relying on it, and periodic
- * maintenance after that as noon.com's markup evolves over time (true of
- * every retailer worker, not specific to Noon -- WORKERS.md §4).
+ * Each field is an ordered array of candidate selectors, tried in order via
+ * textFromFirstMatch() (@repo/scraper-core) -- most specific first, broad
+ * fallback last. Never joined into a single comma-separated CSS selector:
+ * that matches in DOM order, not list-priority order, which caused a bad
+ * price match on jarir.com's worker during its first real run (see that
+ * helper's doc comment) -- fixed here proactively for the same reason.
  */
 export const NOON_SELECTORS = {
-  title: 'h1[data-qa="pdp-name"], h1[class*="productTitle"], h1',
-  price: '[data-qa="pdp-price"], [class*="priceNow"], [class*="sellingPrice"], [class*="price"]',
-  outOfStock:
-    '[data-qa="pdp-out-of-stock"], [class*="outOfStock"], [class*="out-of-stock"], button[data-qa="pdp-add-to-cart"][disabled]',
+  title: ['h1[data-qa="pdp-name"]', 'h1[class*="productTitle"]', "h1"],
+  price: ['[data-qa="pdp-price"]', '[class*="priceNow"]', '[class*="sellingPrice"]', '[class*="price"]'],
+  outOfStock: [
+    '[data-qa="pdp-out-of-stock"]',
+    '[class*="outOfStock"]',
+    '[class*="out-of-stock"]',
+    'button[data-qa="pdp-add-to-cart"][disabled]',
+  ],
 } as const;

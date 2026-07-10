@@ -13,6 +13,17 @@ const ARABIC_INDIC_DIGITS: Record<string, string> = {
 
 const CURRENCY_TOKENS = ["SAR", "sar", "ر.س", "ريال", "﷼", "SR"];
 
+// No real consumer product on the MVP retailers costs anywhere near this.
+// A broad/overly-general CSS selector can match a wrapper element whose
+// combined textContent concatenates the price with an unrelated number
+// (SKU, old strikethrough price, etc.) with no separator -- e.g.
+// "1,999.00668751" -- producing a huge but syntactically valid float.
+// Rejecting implausible values here turns that into a clear "could not
+// parse price" error at the call site (WORKERS.md §2's per-item
+// isolation), instead of an opaque `numeric field overflow` from Postgres
+// (products.current_price is numeric(10,2)).
+const MAX_PLAUSIBLE_PRICE = 500_000;
+
 /**
  * Normalizes Eastern Arabic-Indic digits and Arabic decimal/thousands
  * separators (U+066B, U+066C) to their Western equivalents, so downstream
@@ -51,7 +62,7 @@ export function parsePrice(raw: string): { amount: number; currency: string } | 
   if (!cleaned) return null;
 
   const amount = Number.parseFloat(cleaned);
-  if (!Number.isFinite(amount) || amount < 0) return null;
+  if (!Number.isFinite(amount) || amount < 0 || amount > MAX_PLAUSIBLE_PRICE) return null;
 
   return { amount: Math.round(amount * 100) / 100, currency };
 }

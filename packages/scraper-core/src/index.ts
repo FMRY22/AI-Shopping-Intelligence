@@ -11,3 +11,4 @@ export {
 export { runRetailerWorker } from "./run-worker";
 export type { RetailerWorkerConfig } from "./run-worker";
 export type { ScrapedProduct, ScrapeProductPageFn } from "./types";
+export { textFromFirstMatch, existsAny } from "./select-first";
