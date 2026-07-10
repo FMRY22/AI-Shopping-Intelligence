@@ -3,7 +3,7 @@
 
 | | |
 |---|---|
-| **Status** | Draft v1.0 — Awaiting founder review |
+| **Status** | v1.1 — Approved (embedding model resolved 2026-07-10; specs left as `jsonb` by default) |
 | **Phase** | 4 of 10 — Database |
 | **Last updated** | 2026-07-10 |
 | **Depends on** | `PRD.md` (Phase 1) · `ARCHITECTURE.md` (Phase 2) · `DEPLOYMENT.md` (Phase 3) |
@@ -130,7 +130,7 @@ erDiagram
 | Column | Type | Notes |
 |---|---|---|
 | `product_id` | `uuid` PK, FK → `products.id` | one embedding per product at MVP (title + description composite) |
-| `embedding` | `vector(1536)` | `pgvector`; dimension matches the embedding model chosen in `packages/ai` |
+| `embedding` | `vector(384)` | `pgvector`; **resolved 2026-07-10** (see `AI_AGENTS.md` §6): embeddings are generated **locally inside the GitHub Actions worker** via a small multilingual model (`Xenova/paraphrase-multilingual-MiniLM-L12-v2`, 384 dimensions, Arabic+English support), not via an external API — genuinely $0, no rate limit, and doesn't compete with the 50/day OpenRouter budget used for reasoning tasks |
 | `updated_at` | `timestamptz` | recomputed only when title/description materially changes — same incremental-cost principle as FR-14 |
 
 **Index:** `HNSW (embedding vector_cosine_ops)` — per `ARCHITECTURE.md` §3.2, adequate to ~5–10M vectors, orders of magnitude above MVP volume.
@@ -320,8 +320,8 @@ Per `DEPLOYMENT.md` §9 ("all migrations must be reversible, versioned files fro
 
 ## 12. Open Questions for Phase 5
 
-1. **Embedding model/dimension:** `product_embeddings.embedding vector(1536)` assumes a 1536-dimension model (OpenAI/Cohere-style default). Since the AI layer now runs on OpenRouter free models (`ARCHITECTURE.md` §3.6), confirm which specific free embedding model `packages/ai` will use before Phase 5 locks in agent designs that depend on it — dimension mismatches are a schema migration, better decided once, not adjusted later.
-2. Any product attributes beyond title/price/rating that matter enough to be first-class columns (rather than sitting inside a generic `jsonb` specs field) — e.g., brand, for a future "recommend alternative brand" feature? Low-stakes, defaults to a `specs jsonb` catch-all column on `products` if no strong preference.
+1. ~~Embedding model/dimension~~ — **Resolved**, see §4 and `AI_AGENTS.md` §6.
+2. Any product attributes beyond title/price/rating that matter enough to be first-class columns (rather than sitting inside a generic `jsonb` specs field) — e.g., brand, for a future "recommend alternative brand" feature? Low-stakes, defaults to a `specs jsonb` catch-all column on `products` if no strong preference — proceeding with that default.
 
 ---
 
