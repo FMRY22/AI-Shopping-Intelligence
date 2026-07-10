@@ -13,6 +13,12 @@ export async function launchContext(): Promise<{ browser: Browser; context: Brow
   const browser = await chromium.launch({
     headless: true,
     proxy: proxyServer ? { server: proxyServer } : undefined,
+    // Works around net::ERR_HTTP2_PROTOCOL_ERROR seen against some sites'
+    // WAF/CDN layer when headless Chromium negotiates HTTP/2 -- falls back
+    // to HTTP/1.1, which is otherwise functionally equivalent for scraping.
+    // Confirmed necessary against noon.com during this worker's first real
+    // run (GitHub Actions, 2026-07-10).
+    args: ["--disable-http2"],
   });
   const context = await browser.newContext({
     userAgent: USER_AGENT,
