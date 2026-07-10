@@ -61,7 +61,7 @@ flowchart TB
 
     Cache[("Upstash Redis\n(cache / rate-limit / dedupe)")]
 
-    GHA -->|"calls /api/scheduler/due"| DB
+    GHA -->|"calls get_due_items() RPC"| DB
     GHA --> W1 & W2 & W3 & W4 & W5 & W6
     W1 & W2 & W3 & W4 & W5 & W6 -->|"writes price/coupon/review data"| DB
     DB -->|"material change detected"| CE
@@ -117,7 +117,7 @@ This is the largest deviation from the originally-named stack (Railway) — flag
 Not "crawl everything on a fixed timer" (explicitly rejected by PRD). Concrete design:
 
 1. `products` table carries `popularity_score`, `volatility_score` (variance of recent price history), `last_checked_at`, and a computed `check_interval` — shrinks for high-popularity/high-volatility products, grows for long-tail ones.
-2. A scheduler API route (`/api/scheduler/due?retailer=X&limit=N`) returns the top-N most-overdue, highest-priority products for that retailer, computed via a SQL query — **the actual intelligence lives in SQL, not in the cron expression.**
+2. A Postgres RPC function (`get_due_items(source, limit)`, called directly via `supabase.rpc()` — formalized in `API.md` §1/§3.1 of `WORKERS.md`) returns the top-N most-overdue, highest-priority products for that retailer, computed via a SQL query — **the actual intelligence lives in SQL, not in the cron expression, and not behind an HTTP API layer either.**
 3. Each retailer's GitHub Actions workflow fires every 15–30 minutes, calls this endpoint, and scrapes exactly that batch.
 4. Scaling path: when one workflow run can no longer cover its polling interval, shard by category or hash into additional workflow files — no re-architecture needed, just more files.
 

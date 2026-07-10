@@ -19,7 +19,7 @@ Every worker in this document — retailer, coupon/cashback, or (later) social �
 
 ```
 GitHub Actions workflow (own file, own cron schedule)
-  1. Call GET /api/scheduler/due?source=<worker>&limit=N   → prioritized batch (§3)
+  1. Call get_due_items(source, limit) via Supabase RPC   → prioritized batch (§3)
   2. For each item in the batch, independently:
        scrape → normalize → validate → write to DB → run inline deterministic
        agent logic (Price Hunter / Coupon Hunter / embedding generation, per
@@ -46,15 +46,15 @@ GitHub Actions workflow (own file, own cron schedule)
 
 Elaborates `ARCHITECTURE.md` §3.5 into concrete, per-worker parameters.
 
-### 3.1 The `/api/scheduler/due` contract
+### 3.1 The "what's due" contract
 ```
-GET /api/scheduler/due?source=<worker_slug>&limit=N
+get_due_items(source text, limit int)
 → returns products (or coupons/cashback rows) ordered by:
    priority = (now() - next_due_at)  DESC   -- most overdue first
    -- next_due_at = last_checked_at + check_interval
    -- check_interval shrinks with popularity_score/volatility_score (DATABASE.md §4)
 ```
-This single query is the entire "smart scheduler" — no separate scheduler service or daemon exists; the GitHub Actions cron trigger is a coarse dispatcher, and this query is where the actual prioritization decision is made, fresh, on every call.
+**Implemented as a Postgres RPC function** (`API.md` §1, Layer C), called directly via `supabase.rpc('get_due_items', {...})` from each worker's GitHub Actions script — not a Next.js Route Handler; workers talk to Postgres directly with the service-role key, with no HTTP API layer in between (`API.md` §6). This single query is the entire "smart scheduler" — no separate scheduler service or daemon exists; the GitHub Actions cron trigger is a coarse dispatcher, and this function is where the actual prioritization decision is made, fresh, on every call.
 
 ### 3.2 Cadence per worker type
 
@@ -172,4 +172,4 @@ Ties together `PRD.md`'s NFR "Legal/ToS risk" into concrete worker behavior:
 
 ## 11. Next Steps
 
-Phase 6+7 is complete and approved. Next: **Phase 8: `API.md`** — the API surface (`/api/scheduler/due` formalized here, plus the user-facing and admin endpoints) that workers, agents, and the web app all call.
+Phase 6+7 is complete and approved. Next: **Phase 8: `API.md`** — the API surface (`get_due_items` formalized here, plus the user-facing and admin endpoints) that workers, agents, and the web app all call.
