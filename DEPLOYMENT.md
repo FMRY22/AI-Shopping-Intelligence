@@ -125,9 +125,11 @@ No paid observability stack — assembled from what's already free:
 
 ## 8. Domains & DNS
 
-- Vercel Hobby supports **custom domains at no additional cost** — only the domain registration itself has a cost (external to this stack, founder's choice of registrar).
-- Until a domain is chosen, the Vercel-provided `*.vercel.app` subdomain is the production URL — fully functional, just not branded.
-- Resend requires a **verified sending domain** for production email deliverability (a shared/testing domain works initially but has lower deliverability and stricter limits) — tie domain verification to whenever the custom domain decision is made.
+**Decision (2026-07-10): no custom domain.** The platform runs permanently on the Vercel-provided `*.vercel.app` subdomain — fully functional, $0, matches the "as close to $0 as possible" MVP directive (domain registration is itself a small recurring cost, avoided entirely).
+
+**Consequence worth stating plainly (not hidden in a footnote): without a verified custom domain, Resend cannot send email to arbitrary third-party addresses** — its default/shared sending domain only delivers to the account owner's own registered email address. In practice this means the email notification channel (FR-16) works for exactly one recipient: the founder. **This is a non-issue at today's scope** (PRD §7.2: MVP is personal/single-user), but it is a hard ceiling, not a degraded experience — the moment a second real user needs email alerts, a verified domain becomes mandatory, not optional. Two things stay unaffected by this: (1) **Web Push notifications work for any number of users regardless of domain** — they're tied to the web app's origin, not to email deliverability; (2) the `/admin` route and the app itself are equally usable by anyone at the `*.vercel.app` URL.
+
+**Graduation trigger:** add a custom domain (and verify it with Resend) at the same time real multi-user usage is planned — this is the same trigger point already implied by PRD §9 (V1) and §17 Q2 (affiliate/monetization), so it's not a new decision point, just a consequence of ones already made.
 
 ---
 
@@ -148,12 +150,13 @@ Every component is $0 by design (`ARCHITECTURE.md` §4), so "cost monitoring" he
 ## 11. Open Questions for Phase 4
 
 1. Backup repo naming/ownership — same GitHub account as the main repo, or a dedicated "ops" account? (Low-stakes, defaulting to same account unless you'd rather separate them.)
-2. Any preference on the custom domain / branding timing — before or after MVP functionality is working end-to-end?
+
+*(Domain timing — resolved §8: no custom domain for MVP.)*
 
 ---
 
 ## 12. Next Steps
 
 1. Founder review — approve or annotate, especially §7 (backup design is the one genuinely new risk this phase surfaces, since it wasn't covered in `ARCHITECTURE.md`).
-2. Answer §11 if relevant (both are low-stakes and have sensible defaults if skipped).
+2. Answer §11 if relevant (low-stakes, has a sensible default if skipped).
 3. Upon approval → **Phase 4: `DATABASE.md`** — full schema design (products, price_history, change_events, product_verdicts, watchlists, users, and the popularity/volatility scheduling fields referenced throughout `ARCHITECTURE.md`).
