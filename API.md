@@ -3,7 +3,7 @@
 
 | | |
 |---|---|
-| **Status** | Draft v1.0 — Awaiting founder review |
+| **Status** | v1.0 — Approved (no blocking open questions) |
 | **Phase** | 8 of 10 — API |
 | **Last updated** | 2026-07-10 |
 | **Depends on** | `ARCHITECTURE.md` §3.1 · `DATABASE.md` (RLS policies) · `AI_AGENTS.md` · `WORKERS.md` §3.1 |
