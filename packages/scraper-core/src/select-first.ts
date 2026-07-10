@@ -14,12 +14,27 @@ import type { Page } from "playwright";
  * `numeric field overflow` on insert -- see packages/shared/src/price.ts's
  * MAX_PLAUSIBLE_PRICE guard, added as defense-in-depth alongside this fix).
  */
+// Per-selector wait: long enough for a client-rendered page's JS to paint
+// the element (goto() uses waitUntil: "commit", which doesn't wait for
+// content -- see scrape.ts in each worker), short enough that trying
+// several candidates in sequence doesn't blow the job's overall timeout.
+const PER_SELECTOR_TIMEOUT_MS = 10_000;
+
 export async function textFromFirstMatch(page: Page, selectors: readonly string[]): Promise<string | null> {
   for (const selector of selectors) {
-    const locator = page.locator(selector).first();
-    const count = await locator.count().catch(() => 0);
-    if (count === 0) continue;
-    const text = (await locator.textContent().catch(() => null))?.trim();
+    // .textContent() with an explicit timeout auto-waits for the element to
+    // attach (unlike .count(), which reads the DOM instantly and returns 0
+    // if a client-rendered page hasn't painted the element yet -- that
+    // false-negative is what made every selector look like "no match" and
+    // made the title lookup fail outright during this worker's second real
+    // run against jarir.com, 2026-07-10).
+    const text = (
+      await page
+        .locator(selector)
+        .first()
+        .textContent({ timeout: PER_SELECTOR_TIMEOUT_MS })
+        .catch(() => null)
+    )?.trim();
     if (text) return text;
   }
   return null;
@@ -27,8 +42,19 @@ export async function textFromFirstMatch(page: Page, selectors: readonly string[
 
 export async function existsAny(page: Page, selectors: readonly string[]): Promise<boolean> {
   for (const selector of selectors) {
-    const count = await page.locator(selector).count().catch(() => 0);
-    if (count > 0) return true;
+    // A short, explicit wait (not .count()'s instant read) so a
+    // client-rendered "out of stock" badge that hasn't painted yet isn't
+    // mistaken for "in stock" -- but short, since absence is the common,
+    // expected case (most products are in stock) and we don't want every
+    // successful scrape paying this wait for something that legitimately
+    // isn't there.
+    const found = await page
+      .locator(selector)
+      .first()
+      .waitFor({ state: "attached", timeout: 2_000 })
+      .then(() => true)
+      .catch(() => false);
+    if (found) return true;
   }
   return false;
 }
