@@ -3,7 +3,7 @@
 
 | | |
 |---|---|
-| **Status** | Draft v1.0 — Awaiting founder review |
+| **Status** | v1.1 — Approved (§8 defaults accepted 2026-07-10) |
 | **Phase** | 5 of 10 — AI Agents |
 | **Last updated** | 2026-07-10 |
 | **Depends on** | `PRD.md` · `ARCHITECTURE.md` · `DEPLOYMENT.md` · `DATABASE.md` |
@@ -183,16 +183,13 @@ generateVerdict(input: {
 
 ---
 
-## 8. Open Questions for Phase 6
+## 8. Resolved (2026-07-10, founder deferred to design judgment)
 
-1. Review-batching threshold (`N = 5` new reviews before Review Analyst runs) is a reasonable starting default — confirm, or prefer a time-based batch instead (e.g., "once daily regardless of count")?
-2. Trend Detection's z-score outlier threshold is a tuning parameter best set empirically once real watchlist data exists — proceeding with a placeholder default, to be revisited post-launch rather than decided speculatively now.
-
-Both are low-stakes and have sensible defaults — proceeding with them unless you'd rather set them explicitly now.
+1. **Review-batching threshold: `N = 5` new reviews**, accepted as the MVP/V1 default.
+2. **Trend Detection z-score threshold:** left as an empirical tuning parameter, set to a conservative placeholder and revisited post-launch once real watchlist data exists — not decided speculatively now.
 
 ---
 
 ## 9. Next Steps
 
-1. Founder review — approve or annotate, especially §1/§4 (the deterministic-vs-LLM split and budget priority order are the load-bearing decisions here).
-2. Upon approval → **Phase 6: `WORKERS.md`** — the independent data-collection workers (Amazon, Noon, Jarir, extra, Coupon, Cashback, and later social workers) that feed Price Hunter, Coupon Hunter, Cashback Hunter, and the embedding pipeline.
+Phase 5 is complete and approved. Next: **Phase 6: `WORKERS.md`** — the independent data-collection workers (Amazon, Noon, Jarir, extra, Coupon, Cashback, and later social workers) that feed Price Hunter, Coupon Hunter, Cashback Hunter, and the embedding pipeline.
