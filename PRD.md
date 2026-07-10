@@ -9,7 +9,7 @@
 | **Last updated** | 2026-07-10 |
 | **Next document** | `ARCHITECTURE.md` (Phase 2) — not started, pending approval of this PRD |
 
-> **Governance note.** This PRD is the source of truth for *what* we are building and *why*. It intentionally does **not** decide database schemas, queue topologies, or infrastructure sizing — those belong to Phases 2–4. Any technical constraint mentioned here (tech stack, monorepo layout) was pre-specified by the founder and is treated as a fixed input, not a Phase-1 decision.
+> **Governance note.** This PRD is the source of truth for *what* we are building and *why*. It intentionally does **not** decide database schemas, queue topologies, or infrastructure sizing — those belong to Phases 2–4. The tech stack/monorepo layout named in the original brief (Next.js, Railway, Supabase, Redis, Playwright, etc.) is the **default direction**, but per founder decision (2026-07-10, §17 Q5), it is **open for re-evaluation in Phase 2** if a concretely better alternative exists for a given component — any deviation must be explicitly compared and justified in `ARCHITECTURE.md`, not swapped silently.
 
 ---
 
@@ -177,7 +177,7 @@ Numbered `FR-x` for future traceability into `API.md`/`AI_AGENTS.md`/`WORKERS.md
 
 ### 10.3 User-Facing
 - **FR-15** Users can create a watchlist (specific products, or standing criteria e.g. "any laptop under 3000 SAR with 16GB RAM").
-- **FR-16** Users receive proactive notifications (push/email at MVP; WhatsApp/SMS considered later) without needing to open the app.
+- **FR-16** Users receive proactive notifications via **push and email only at MVP** (decided 2026-07-10); WhatsApp Business API and SMS are explicit V1 candidates, not MVP scope, without needing to open the app.
 - **FR-17** Users can view full price history as a chart per product.
 - **FR-18** Users can search/browse products with price, rating, and "deal quality" as first-class filters/sort.
 - **FR-19** The UI must fully support Arabic (RTL) as a first-class, not translated-afterthought, experience — including number formatting (Arabic-Indic vs. Western numerals — configurable), currency (SAR), and date handling (Gregorian primary; Hijri-aware for shopping-event context).
@@ -198,7 +198,7 @@ Numbered `FR-x` for future traceability into `API.md`/`AI_AGENTS.md`/`WORKERS.md
 | **Performance** | User-facing pages must be interactive in <2s on median KSA mobile network conditions. Search must return in <300ms p95. |
 | **Availability** | 99.9% uptime target for user-facing services post-V1; background collection degradation must never take down the web/API tier. |
 | **Security** | No plaintext secrets; least-privilege access between services; all user PII encrypted at rest; see `SECURITY.md` (Phase to follow). |
-| **Compliance** | Must comply with Saudi PDPL (SDAIA-enforced) for any personal data (users, and any personal data incidentally present in scraped reviews/social content — e.g., reviewer names/handles). Data residency approach for KSA personal data is an **open decision**, flagged §17. |
+| **Compliance** | Must comply with Saudi PDPL (SDAIA-enforced) for any personal data (users, and any personal data incidentally present in scraped reviews/social content — e.g., reviewer names/handles). **Decided (2026-07-10):** hosting outside KSA is acceptable for MVP, provided PDPL-compliant technical/organizational safeguards are in place (see §17 Q1 resolution) — this unblocks Phase 2/3 region selection (e.g., Supabase/Railway nearest compliant region) without requiring in-Kingdom hosting at launch. |
 | **Cost Efficiency** | Collection frequency must scale with product popularity/volatility, not run uniformly — this is a core cost lever, detailed functionally in `WORKERS.md`/scheduler design (Phase 6/7). |
 | **Maintainability** | Monorepo, typed codebase end-to-end (TypeScript), documented interfaces between agents/workers/services so any one piece can be rebuilt without touching the rest. |
 | **Auditability** | Every AI-generated recommendation must be traceable to the data it used (for debugging, for user trust, and for regulatory defensibility). |
@@ -217,7 +217,9 @@ Numbered `FR-x` for future traceability into `API.md`/`AI_AGENTS.md`/`WORKERS.md
 
 ## 13. Monetization Strategy (directional — full model deferred to a future BUSINESS.md if requested)
 
-1. **Affiliate commissions** from retailer partner programs on outbound purchase clicks.
+> **Decided (2026-07-10):** No affiliate/partner relationships with Amazon.sa, Noon, Jarir, or extra exist today (§17 Q2 resolution). MVP therefore ships with **zero live monetization** — the priority is coverage, freshness, and trust. Affiliate applications should open in parallel with MVP build (most programs require a live product to apply), and §13.1 becomes real only once approved. This also means MVP cost must be sustainable without affiliate revenue as a fallback — a constraint for Phase 3 infra sizing.
+
+1. **Affiliate commissions** from retailer partner programs on outbound purchase clicks. *(Not yet secured — apply during/after MVP build, see note above.)*
 2. **Cashback take-rate** — margin on cashback offers surfaced/brokered through the platform.
 3. **Sponsored placement** — clearly and permanently labeled as sponsored; must never be visually or algorithmically conflated with organic "best deal" ranking (trust is the core asset — this is a hard product principle, not a growth-team negotiation point).
 4. **Premium subscription** (future) — advanced alerts, unlimited watchlist criteria, deeper price-prediction.
@@ -258,15 +260,15 @@ Numbered `FR-x` for future traceability into `API.md`/`AI_AGENTS.md`/`WORKERS.md
 
 ## 17. Open Questions — Decisions Needed Before Phase 2
 
-These require founder input; Phase 2 (System Architecture) will make technical decisions that depend on some of these answers.
+Founder decisions recorded 2026-07-10:
 
-1. **Data residency:** Should personal data of Saudi users be hosted in-Kingdom (implications for Supabase/Railway region choice), or is hosting outside KSA with PDPL-compliant safeguards acceptable at MVP stage? *(Affects Phase 2/3 infra region choice.)*
-2. **Affiliate program access:** Do we already have (or can we realistically obtain pre-launch) affiliate/partner relationships with Amazon.sa, Noon, Jarir, and extra? This affects whether MVP monetization (§13.1) is real at launch or a later milestone.
-3. **MVP notification channel:** Push notifications require a web/native app install; email has lower friction but lower engagement. Confirm push+email for MVP, defer WhatsApp/SMS (higher engagement in KSA but added cost/compliance complexity) to V1?
-4. **Success metric ownership:** The KPI targets in §7.2 are my proposed placeholders — please confirm or revise before they become the baseline Phase 2+ designs are optimized against.
-5. **Monorepo/tech-stack constraints (§15):** Confirming these are locked decisions from you, not open for re-evaluation in Phase 2 — correct?
+1. **Data residency — RESOLVED.** Hosting outside KSA is acceptable for MVP, provided PDPL-compliant technical/organizational safeguards are implemented (encryption, access controls, documented lawful basis, breach process). No in-Kingdom hosting requirement at launch. Applied in §11 (Compliance row). Data-residency posture should be revisited if/when regional expansion (§9 Phase D) or enterprise/government customers (§13.5 B2B) raise the bar.
+2. **Affiliate program access — RESOLVED.** No affiliate/partner relationships with Amazon.sa, Noon, Jarir, or extra exist today. MVP ships with no live affiliate monetization; applications open in parallel with/after MVP build. Applied in §13. Phase 3 infra-cost planning must assume **zero affiliate revenue** as the baseline case, not a fallback.
+3. **MVP notification channel — RESOLVED.** Push + email only for MVP. WhatsApp Business API and SMS are explicit, scoped V1 candidates (not deferred indefinitely — flag for `ROADMAP.md`). Applied in §10.3 (FR-16).
+4. **Success metric ownership — STILL OPEN.** The KPI targets in §7.2 remain proposed placeholders, not yet explicitly confirmed. Carried forward; will be revisited at the start of Phase 2 rather than blocking it, since these are tuning targets, not architecture-determining constraints.
+5. **Monorepo/tech-stack constraints — RESOLVED.** Treated as the default direction, not a locked mandate: Phase 2 may propose a concretely better alternative for any component, provided it is explicitly compared and justified in `ARCHITECTURE.md` rather than swapped silently. Applied in the governance note at the top of this document.
 
-**I will not proceed to Phase 2 architecture until at least Q1, Q2, and Q5 are answered**, since they materially affect infrastructure region selection and the monetization-related data model.
+**Status:** Q1, Q2, Q3, and Q5 are resolved. Q4 remains open but is non-blocking. Phase 2 (`ARCHITECTURE.md`) may now proceed.
 
 ---
 
