@@ -48,7 +48,7 @@ flowchart TB
     end
 
     subgraph Intelligence["AI Layer (packages/ai)"]
-        AI["Claude (single provider,\nswappable interface)"]
+        AI["OpenRouter free models\n(fallback chain,\nswappable interface)"]
     end
 
     subgraph Delivery["Notification & Web"]
@@ -123,14 +123,16 @@ Not "crawl everything on a fixed timer" (explicitly rejected by PRD). Concrete d
 
 This satisfies the PRD's explicit requirement that the scheduler is "foundational, not an optimization to defer," entirely inside the free tier.
 
-### 3.6 AI Layer — one primary provider (Claude), behind a swappable interface
+### 3.6 AI Layer — free open-weight models via OpenRouter, behind a swappable interface
 
-**Decision: ship MVP with Claude only, called through a thin interface (`packages/ai`), deferring the full multi-provider abstraction.** Flagged in §7.4.
+**Decision (revised 2026-07-10): ship MVP on genuinely free AI — OpenRouter's `:free` model tier — not Claude.** The founder chose true $0 over paid-but-better-quality (see §7.4 for the full trade-off).
 
-- Interface shape: `generateVerdict(input): Promise<Verdict>` — call sites never touch the provider SDK directly, so a second provider can be added later without touching consumers.
-- **Model allocation by task:** reasoning-heavy work (buy-now-vs-wait verdicts, review synthesis with cited pros/cons — PRD FR-9, FR-12) uses **Claude Sonnet 5**; high-volume/simple extraction (price parsing, coupon-validity classification) uses **Claude Haiku 4.5**.
-- **Why Claude despite cheaper raw per-token pricing elsewhere (e.g., GPT-5-nano):** this workload is reasoning/quality-sensitive, not pure classification — quality directly serves the PRD's "explainable, trustworthy verdict" product principle (§5). At MVP volume, absolute cost is trivial either way (estimated **$5–15/month** for ~1,500 incremental re-analyses/day with prompt caching) — the real cost control is FR-14 (only re-analyze on change), not provider choice.
-- Prompt caching is used on the shared system prompt/schema to cut repeated-context cost.
+- **Interface shape unchanged:** `generateVerdict(input): Promise<Verdict>` in `packages/ai` — call sites never touch a provider SDK directly. This is what makes the provider swap a config change, not a rewrite, whichever direction it goes later.
+- **Provider: OpenRouter**, calling 2–3 free (`:free`-suffixed) open-weight models in a fallback chain (e.g., a strong reasoning-oriented free model as primary, a second free model as automatic fallback on error/timeout/rate-limit) — this exists specifically because free-tier models individually have lower availability guarantees than a paid API, so redundancy across free models substitutes for the reliability a single paid provider would give.
+- **OpenRouter free-tier limits (verified July 2026):** **20 requests/minute**, and a **daily cap of 50 requests/day on a $0 account, rising to 1,000 requests/day after a one-time $10 top-up (the $10 never expires and is not a subscription)**. [openrouter.ai/docs, klymentiev.com, costbench.com, 2026]
+- **Practical sizing:** at true personal-watchlist scale (a handful of categories, not the full 1,000–5,000-product ceiling actively re-analyzed daily), 50 req/day is workable if AI calls are strictly gated by FR-14 (material change only) and batched/throttled — but it is tight, and a busy day (e.g., adding many watchlist items, or a big multi-product price-drop event) can hit the cap. **Recommended, still-$0-recurring path: the one-time $10 OpenRouter top-up** — it is a single non-recurring purchase (not a subscription), after which the 1,000 req/day ceiling comfortably covers MVP scale indefinitely at no further cost. This is presented as an option, not applied by default — flagged in §8 for a decision.
+- **Model allocation by task:** the same task split as before (reasoning-heavy buy-now-vs-wait verdicts and review synthesis vs. lighter structured extraction) still applies — it's just mapped to free-model equivalents (a stronger free reasoning model for the former, a smaller/faster free model for the latter) instead of Sonnet/Haiku.
+- **Quality trade-off, stated plainly:** free open-weight models are not at Claude Sonnet's level for nuanced, cited reasoning — this is a deliberate cost/quality trade the founder made explicitly (§7.4), not an oversight. Because the interface is swappable, any specific task where free-model quality visibly fails the PRD's "explainable, trustworthy verdict" bar (§5) can be upgraded to a paid model *for that task only* without touching the rest of the system.
 
 ### 3.7 Auth — Supabase Auth (bundled, free)
 
@@ -165,7 +167,7 @@ GitHub Actions (per-worker, ~every 15-30 min)
   → IF material change (price delta, stock flip, new coupon, rating shift):
       write change_events row  ← this gate satisfies FR-14
   → change_events triggers AI re-analysis (Postgres trigger/webhook or lightweight poller)
-  → packages/ai (Claude) generates updated verdict → product_verdicts (versioned, auditable)
+  → packages/ai (OpenRouter free models) generates updated verdict → product_verdicts (versioned, auditable)
   → recommendation matcher checks watchlists for users whose criteria now match
   → Upstash QStash fans out → Web Push / Resend email
   → user clicks through → apps/web reads product_verdicts + price_history for the full explanation
@@ -185,11 +187,11 @@ Every verdict references the `change_event` and data snapshot that produced it �
 | Vector | pgvector | $0 | Vector count > 5–10M |
 | Cache/Queue | Upstash Redis + QStash Free | $0 | > 500K Redis commands/mo or > 1K QStash msgs/day |
 | Workers | GitHub Actions | $0 (2,000 min/mo private) | Minutes exhausted, or need sub-5-min precision |
-| AI | Claude, single provider | ~$5–15 | Redundancy or per-task cost-routing becomes material |
+| AI | OpenRouter free models (`:free` tier) | $0 (or one-time non-recurring $10 for higher daily cap — §8) | Free-model quality visibly fails the "trustworthy verdict" bar on a specific task (upgrade that task only), or daily request cap (50, or 1,000 post-topup) is consistently insufficient |
 | Auth | Supabase Auth | $0 | > 50,000 MAU |
 | Notifications | Web Push + Resend Free | $0 | > 100 emails/day sustained |
 | Monorepo tooling | Turborepo | $0 | Team scale needs Nx's generators/graph tooling |
-| **Total** | | **≈ $5–15/month** | |
+| **Total** | | **$0/month recurring** (optional one-time, non-recurring $10 OpenRouter top-up — §8) | |
 
 ---
 
@@ -200,9 +202,9 @@ Every verdict references the `change_event` and data snapshot that produced it �
 | FR-1 to FR-8 (data collection) | §3.4 independent per-source GitHub Actions workers |
 | FR-9 to FR-14 (AI intelligence) | §3.6 AI layer + §3.10 change-gated re-analysis (FR-14) |
 | FR-15 to FR-20 (user-facing) | §3.1 Next.js web app + §3.7 Auth + §3.8 notifications |
-| FR-21 to FR-23 (admin/ops) | `apps/admin` on same Vercel deployment, reads worker run status via GitHub Actions API + Postgres |
+| FR-21 to FR-23 (admin/ops) | Role-gated `/admin` route inside `apps/web` (§8.3), reads worker run status via GitHub Actions API + Postgres |
 | NFR Scalability | Principle 1 — every component has a named graduation path (§4) that doesn't require redesign |
-| NFR Cost Efficiency | §3.5 popularity/volatility-weighted scheduler; §4 near-$0 MVP cost |
+| NFR Cost Efficiency | §3.5 popularity/volatility-weighted scheduler; §4 $0/month recurring MVP cost |
 | NFR Reliability (worker isolation) | §3.4 — isolation by construction (separate VMs), not by careful coding |
 | NFR Auditability | §3.10 — every verdict traces to its triggering change_event |
 | §13 Monetization (sponsored vs. organic separation) | Architecturally: sponsored placement must be a separate, clearly-flagged field on listings, never blended into the `product_verdicts` ranking logic — call out explicitly in Phase 8 (API design) |
@@ -215,7 +217,9 @@ Every verdict references the `change_event` and data snapshot that produced it �
 |---|---|---|
 | Supabase free project pauses after 7 days of inactivity | A request or scheduled worker hits a paused DB, times out | Self-mitigating: workers touch the DB every 15–30 min at MVP cadence. Add a scheduled healthcheck ping as backstop. |
 | GitHub Actions cron: 5-min minimum, UTC-rooted, up to 5–30 min delay under load | Cannot guarantee true real-time freshness; Y1 target of <30 min staleness is not reachable on pure cron dispatch | Treat as coarse dispatcher only (§3.5); document MVP freshness target as best-effort/cron-based (already reflected in PRD §7.2); graduating past this requires a real scheduler service later |
-| GitHub Actions private-repo free minutes (2,000/mo) can be exhausted as worker count grows | Workers silently stop running | Monitor Actions usage; consider public repo (unlimited free minutes) if source visibility is acceptable; budget small overage ($0.008/min) as a pre-approved paid line if not |
+| ~~GitHub Actions private-repo free minutes (2,000/mo) can be exhausted~~ | — | **Resolved (§8.2):** repo is public, so Actions minutes are unlimited/free — no longer a risk |
+| OpenRouter free-model tier caps at **50 requests/day** (or 20/min) on an unfunded account | AI re-analysis could stall mid-day on a busy day (many watchlist changes / a big price-drop event), delaying verdicts and notifications | Gate all AI calls behind FR-14's change-detection gate (never call on a timer); queue overflow requests to the next day rather than failing silently; strongly consider the one-time non-recurring $10 OpenRouter top-up (raises cap to 1,000/day, still $0 recurring) — flagged as a decision in §8 |
+| Free open-weight models (OpenRouter `:free` tier) have lower availability/uptime guarantees than a paid API, and can be deprecated or swapped by OpenRouter with little notice | A single free model going down or disappearing could silently degrade verdict quality or break the AI layer | §3.6's 2–3-model fallback chain within `packages/ai` — if the primary free model errors or times out, automatically retry against the next model in the chain before failing |
 | Vercel Hobby: 60s function timeout, hard caps, no overage billing | Any accidentally-long request hard-fails; hitting a cap takes the site offline until next month/upgrade | Keep AI calls and scraping entirely off the user-request path (already true per §3.10 — they run via the async change-detection flow, not inline) |
 | Vercel Hobby is non-commercial-use only | ToS violation risk once monetization (§13 PRD) goes live | Explicit gate: upgrade to Pro before/at the same time as any affiliate/sponsored feature ships |
 | Upstash Redis free caps at 500K commands/month | Cache/rate-limit logic could degrade during a traffic spike (White Friday, Ramadan) | Fallback to direct Postgres read on cache miss (degraded, not broken); budget cheap pay-as-you-go overage ahead of known seasonal spikes |
@@ -239,8 +243,8 @@ The original brief named: Next.js, React, TypeScript, TailwindCSS, Shadcn UI, **
 ### 7.3 Dedicated vector DB → pgvector on the same Postgres instance
 **Trade-off:** one database instead of three, but couples vector workload to the same compute as the transactional DB. Acceptable at MVP embedding volume; the mitigation and graduation trigger are in §6/§4.
 
-### 7.4 Multi-provider AI → Claude only, behind a swappable interface
-**Trade-off:** no automatic provider redundancy, no per-task cost-routing to cheaper models. Gains: far less complexity for a system with no users yet; the swappable-interface requirement is still met structurally. This one is close to the PRD's own explicit direction already — flagging for confirmation rather than contesting it.
+### 7.4 Multi-provider AI → free open-weight models via OpenRouter, behind a swappable interface
+**Original recommendation was Claude-only** (paid, ~$5–15/month, higher quality). **Founder decision (2026-07-10): true $0 preferred over paid-but-better-quality.** Revised to OpenRouter's free (`:free`) model tier, with a 2–3-model fallback chain for reliability (§3.6). **Trade-off, stated plainly:** free open-weight models are meaningfully behind Claude Sonnet on nuanced reasoning/citation quality, which is the exact axis the PRD's "explainable, trustworthy verdict" product principle (§5) cares about — this is a real quality cost, not just an infra one, knowingly accepted. Mitigations: (a) the swappable interface means any single task can be upgraded to a paid model later without touching the rest of the system; (b) OpenRouter's one-time (non-recurring) $10 top-up raises the daily request ceiling from 50 to 1,000 — recommended even under a "$0 recurring cost" philosophy, since it is not a subscription; flagged as a decision in §8, not applied by default.
 
 ### 7.5 Vercel Hobby's non-commercial ToS
 Not a stack deviation but a constraint worth surfacing here: acceptable today (zero monetization), becomes a required upgrade the moment §13 monetization ships.
@@ -274,10 +278,18 @@ services/        scheduler · notification · search · recommendation
 
 (`apps/api` was already folded into `apps/web`'s Route Handlers per §3.1 — no separate API app exists at MVP.)
 
+4. **AI provider (revised): OpenRouter free (`:free`) models instead of Claude** (§3.6, §7.4). Founder explicitly chose true $0 recurring cost over Claude's paid-but-higher-quality output. Total MVP infrastructure cost is now **$0/month recurring** (§4).
+
+---
+
+## 8b. Still Open — Needs a Decision Before Phase 3
+
+1. **OpenRouter one-time top-up.** Spend a single, non-recurring $10 on OpenRouter now (raises the free-model daily cap from 50 → 1,000 requests/day, permanently, with no subscription) — or start on the pure $0 tier (50 req/day) and only pay if the cap actually becomes a problem? Given MVP is personal-scale, 50/day may well be enough, but it's tight if FR-14 change events cluster (e.g., a multi-product price-drop day). This is the last dollar-figure decision before Phase 3.
+
 ---
 
 ## 9. Next Steps
 
 1. Founder review of this architecture — approve or annotate, especially §7.
-2. Answer §8 open questions.
+2. Answer the §8b open question.
 3. Upon approval → **Phase 3: Infrastructure design** (concrete deployment config, environment variables, secrets management, CI/CD pipeline shape, monitoring/alerting for the free-tier risk table in §6).
