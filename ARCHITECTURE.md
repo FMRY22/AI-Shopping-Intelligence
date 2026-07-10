@@ -7,7 +7,7 @@
 | **Phase** | 2 of 10 — System Architecture |
 | **Last updated** | 2026-07-10 |
 | **Depends on** | `PRD.md` (Phase 1, approved — all §17 questions resolved) |
-| **Next document** | `INFRASTRUCTURE.md` / infra sizing details (Phase 3) once this is approved |
+| **Next document** | `DEPLOYMENT.md` (Phase 3) once this is approved |
 
 > **Governance note.** This document decides *component-level* architecture — which system does what, and how they talk to each other — grounded specifically in the PRD's MVP constraint: **personal/limited-scale usage, cost as close to $0/month as possible, cheapest-that's-still-genuinely-good over best-in-class** (PRD §7.2, §11, §17 Q4). It does **not** finalize database schemas, exact infra sizing, or per-worker implementation detail — those are Phases 3–6. Every pricing/limit claim below was verified via live research in July 2026 (sources inline), not assumed from training knowledge, because getting this wrong would directly misinform a cost-sensitive decision.
 
