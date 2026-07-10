@@ -1,0 +1,45 @@
+name: worker-noon
+
+on:
+  schedule:
+    # Every 20 minutes, per WORKERS.md §3.2. GitHub Actions' cron floor is
+    # 5 minutes and firing can be delayed under platform load
+    # (ARCHITECTURE.md §6) -- this workflow is a coarse dispatcher only; the
+    # real prioritization happens in the get_due_items() SQL function.
+    - cron: "*/20 * * * *"
+  workflow_dispatch: {}
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.34.5
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+
+      - name: Install Playwright Chromium
+        run: pnpm --filter @repo/worker-noon exec playwright install --with-deps chromium
+
+      - name: Run worker
+        working-directory: workers/noon
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: pnpm start
