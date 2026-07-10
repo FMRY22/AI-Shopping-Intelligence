@@ -11,4 +11,9 @@
  * This repo ships with none, since real URLs go stale and are specific to
  * whatever you're actually tracking -- copy them directly from noon.com.
  */
-export const SEED_PRODUCT_URLS: string[] = [];
+export const SEED_PRODUCT_URLS: string[] = [
+  // Tracking/referral query params (o=, shareId, utm_*) stripped -- only the
+  // canonical /p/ product path is kept, so re-sharing the same product later
+  // doesn't create a duplicate row.
+  "https://www.noon.com/en-sa/N70022739V/p/",
+];
