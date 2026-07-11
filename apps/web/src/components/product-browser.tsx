@@ -27,16 +27,26 @@ function ProductRow({ product }: { product: Product }) {
 // Kept as a small, self-contained client component -- the initial list
 // still renders server-side in page.tsx for a fast first paint; this only
 // takes over once the user actually types.
+//
+// GET /api/search only covers products already collected. When it comes up
+// empty, POST /api/track (PRD.md FR-1/FR-18) is the fallback: a live,
+// on-demand search of the retailer itself, seconds long, offered as an
+// explicit action rather than fired automatically on every keystroke.
 export function ProductBrowser({ initialProducts }: { initialProducts: Product[] }) {
   const [query, setQuery] = useState("");
   const [products, setProducts] = useState(initialProducts);
   const [isSearching, setIsSearching] = useState(false);
+  const [hasSearchedLocally, setHasSearchedLocally] = useState(false);
+  const [isTracking, setIsTracking] = useState(false);
+  const [trackError, setTrackError] = useState<string | null>(null);
 
   useEffect(() => {
     const trimmed = query.trim();
+    setTrackError(null);
     if (!trimmed) {
       setProducts(initialProducts);
       setIsSearching(false);
+      setHasSearchedLocally(false);
       return;
     }
 
@@ -45,7 +55,10 @@ export function ProductBrowser({ initialProducts }: { initialProducts: Product[]
     const timeout = setTimeout(() => {
       fetch(`/api/search?q=${encodeURIComponent(trimmed)}`, { signal: controller.signal })
         .then((res) => res.json() as Promise<{ products?: Product[]; error?: string }>)
-        .then((data) => setProducts(data.products ?? []))
+        .then((data) => {
+          setProducts(data.products ?? []);
+          setHasSearchedLocally(true);
+        })
         .catch((err: unknown) => {
           if (err instanceof Error && err.name !== "AbortError") console.error(err);
         })
@@ -58,6 +71,30 @@ export function ProductBrowser({ initialProducts }: { initialProducts: Product[]
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [query]);
+
+  function searchNow() {
+    const trimmed = query.trim();
+    if (!trimmed) return;
+    setIsTracking(true);
+    setTrackError(null);
+    fetch("/api/track", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ query: trimmed }),
+    })
+      .then((res) => res.json() as Promise<{ products?: Product[]; error?: string }>)
+      .then((data) => {
+        if (data.error) {
+          setTrackError(data.error);
+          return;
+        }
+        setProducts(data.products ?? []);
+      })
+      .catch((err: unknown) => setTrackError(err instanceof Error ? err.message : String(err)))
+      .finally(() => setIsTracking(false));
+  }
+
+  const showSearchNow = hasSearchedLocally && !isSearching && products.length === 0 && query.trim();
 
   return (
     <div>
@@ -72,11 +109,29 @@ export function ProductBrowser({ initialProducts }: { initialProducts: Product[]
 
       {isSearching && <p className="mt-2 text-xs text-gray-400">Searching…</p>}
 
-      {!isSearching && products.length === 0 && (
-        <p className="mt-6 text-sm text-gray-500">
-          No products match &quot;{query}&quot;. / ما فيه منتجات مطابقة.
+      {showSearchNow && !isTracking && (
+        <div className="mt-6 text-center">
+          <p className="text-sm text-gray-500">
+            No products match &quot;{query}&quot; yet. / ما لقينا شي محلياً.
+          </p>
+          <button
+            type="button"
+            onClick={searchNow}
+            className="mt-3 rounded-md bg-gray-900 px-4 py-2 text-sm font-medium text-white hover:bg-gray-700"
+          >
+            Search retailers now / ابحث الآن في المتاجر
+          </button>
+          <p className="mt-2 text-xs text-gray-400">Can take up to ~30 seconds / قد يأخذ حتى ٣٠ ثانية</p>
+        </div>
+      )}
+
+      {isTracking && (
+        <p className="mt-6 text-center text-sm text-gray-500">
+          Searching amazon.sa live… / جاري البحث الحي في أمازون...
         </p>
       )}
+
+      {trackError && <p className="mt-4 text-center text-sm text-red-600">{trackError}</p>}
 
       <ul className="mt-6 divide-y divide-gray-200">
         {products.map((product) => (
