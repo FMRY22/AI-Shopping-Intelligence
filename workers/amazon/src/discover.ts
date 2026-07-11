@@ -45,17 +45,19 @@ export const discoverProductUrls: DiscoverUrlsFn = async (page: Page): Promise<s
   if (hrefs.length === 0) {
     // Diagnostics for why the listing page yielded nothing -- final URL
     // (did it redirect to a locale/captcha interstitial?), page title, and
-    // total anchor count on the page (0 would mean the page itself never
-    // rendered; a normal-looking count with 0 /dp/ matches would mean the
-    // markup just isn't what we guessed).
+    // a sample of *any* anchor hrefs present, so we can see the real link
+    // pattern this page uses instead of guessing again blindly.
     const finalUrl = page.url();
     const title = await page.title().catch(() => "<unreadable>");
-    const totalAnchors = await page.locator("a").count().catch(() => -1);
+    const sampleHrefs = await page
+      .locator("a")
+      .evaluateAll((elements) => elements.slice(0, 15).map((el) => (el as unknown as { href: string }).href))
+      .catch(() => [] as string[]);
     log("warn", "amazon discovery found no product links", {
       requestedUrl: catalogUrl,
       finalUrl,
       title,
-      totalAnchors,
+      sampleHrefs,
     });
   }
 
