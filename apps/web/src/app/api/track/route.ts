@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { chromium as playwright } from "playwright-core";
-import chromium from "@sparticuz/chromium";
+import chromium from "@sparticuz/chromium-min";
 import type { Page } from "playwright-core";
 import { createServiceClient, type Product } from "@repo/database";
 import { parsePrice } from "@repo/shared";
@@ -14,6 +14,15 @@ import { parsePrice } from "@repo/shared";
 // Amazon only for this first slice; same pattern extends to Jarir/extra.
 export const runtime = "nodejs";
 export const maxDuration = 60;
+
+// @sparticuz/chromium-min (not the full package): the full package's ~65MB
+// bin/*.br files live behind a pnpm symlink, which Vercel's deployment
+// packager rejects ("invalid deployment package ... files in symlinked
+// directories") -- confirmed by a failed build. -min fetches the same pack
+// from this GitHub release at cold start instead of bundling it, so there's
+// nothing for the packager to choke on. x64 matches Vercel's function arch.
+const CHROMIUM_PACK_URL =
+  "https://github.com/Sparticuz/chromium/releases/download/v149.0.0/chromium-v149.0.0-pack.x64.tar";
 
 const SEARCH_URL = (q: string) => `https://www.amazon.sa/s?k=${encodeURIComponent(q)}`;
 const MAX_RESULTS = 5;
@@ -30,7 +39,7 @@ interface FoundItem {
 async function launchAmazonPage(): Promise<{ browser: Awaited<ReturnType<typeof playwright.launch>>; page: Page }> {
   const browser = await playwright.launch({
     args: chromium.args,
-    executablePath: await chromium.executablePath(),
+    executablePath: await chromium.executablePath(CHROMIUM_PACK_URL),
     headless: true,
   });
   const context = await browser.newContext({
