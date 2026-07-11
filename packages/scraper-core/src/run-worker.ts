@@ -5,7 +5,7 @@ import { launchContext } from "./browser";
 import { log } from "./logger";
 import { runBatch, withSingleRetry } from "./batch";
 import { isMaterialPriceChange, computeVolatility, checkIntervalFor, intervalToMs } from "./price-hunter";
-import type { ScrapeProductPageFn } from "./types";
+import type { DiscoverUrlsFn, ScrapeProductPageFn } from "./types";
 
 /**
  * The full per-retailer worker orchestration (WORKERS.md §1's "common
@@ -19,13 +19,27 @@ export interface RetailerWorkerConfig {
   workerName: string;
   seedUrls: string[];
   scrapeProductPage: ScrapeProductPageFn;
+  /** Optional catalog crawl (FR-1) -- see DiscoverUrlsFn. Omit to keep a worker on manually-seeded URLs only. */
+  discoverUrls?: DiscoverUrlsFn;
+  /** Caps how many newly-discovered products get inserted in a single run, bounding runtime against the 10-minute workflow timeout. */
+  maxNewDiscoveries?: number;
   batchLimit?: number;
 }
 
 type WorkItem = { kind: "recheck"; product: Product } | { kind: "discover"; url: string };
 
+const DEFAULT_MAX_NEW_DISCOVERIES = 8;
+
 export async function runRetailerWorker(config: RetailerWorkerConfig): Promise<void> {
-  const { retailerSlug, workerName, seedUrls, scrapeProductPage, batchLimit = 25 } = config;
+  const {
+    retailerSlug,
+    workerName,
+    seedUrls,
+    scrapeProductPage,
+    discoverUrls,
+    maxNewDiscoveries = DEFAULT_MAX_NEW_DISCOVERIES,
+    batchLimit = 25,
+  } = config;
   const startedAt = new Date().toISOString();
   const db = createServiceClient();
 
@@ -52,14 +66,8 @@ export async function runRetailerWorker(config: RetailerWorkerConfig): Promise<v
   const knownUrls = new Set((existingByUrl ?? []).map((p) => p.url));
   const newSeedUrls = seedUrls.filter((url) => !knownUrls.has(url));
 
-  const workItems: WorkItem[] = [
-    ...(dueProducts ?? []).map((product): WorkItem => ({ kind: "recheck", product })),
-    ...newSeedUrls.map((url): WorkItem => ({ kind: "discover", url })),
-  ];
-
-  log("info", "worker starting", { worker: workerName, dueCount: dueProducts?.length ?? 0, newCount: newSeedUrls.length });
-
-  if (workItems.length === 0) {
+  const needsBrowser = (dueProducts?.length ?? 0) > 0 || newSeedUrls.length > 0 || Boolean(discoverUrls);
+  if (!needsBrowser) {
     await writeRunSummary(db, workerName, retailer.id, startedAt, { status: "success", itemsProcessed: 0, errorMessage: null });
     log("info", "nothing due, exiting", { worker: workerName });
     return;
@@ -67,6 +75,52 @@ export async function runRetailerWorker(config: RetailerWorkerConfig): Promise<v
 
   const { browser, context } = await launchContext();
   try {
+    let newDiscoveredUrls: string[] = [];
+    if (discoverUrls) {
+      const discoveryPage = await context.newPage();
+      try {
+        const candidates = await withSingleRetry(() => discoverUrls(discoveryPage));
+        const unknownCandidates = [...new Set(candidates)].filter(
+          (url) => !knownUrls.has(url) && !newSeedUrls.includes(url),
+        );
+        const { data: alreadyDiscovered } = await db
+          .from("products")
+          .select("url")
+          .eq("retailer_id", retailer.id)
+          .in("url", unknownCandidates.length > 0 ? unknownCandidates : ["__none__"]);
+        const alreadyDiscoveredUrls = new Set((alreadyDiscovered ?? []).map((p) => p.url));
+        newDiscoveredUrls = unknownCandidates
+          .filter((url) => !alreadyDiscoveredUrls.has(url))
+          .slice(0, maxNewDiscoveries);
+      } catch (err) {
+        log("warn", "catalog discovery failed, continuing without it", {
+          worker: workerName,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      } finally {
+        await discoveryPage.close();
+      }
+    }
+
+    const workItems: WorkItem[] = [
+      ...(dueProducts ?? []).map((product): WorkItem => ({ kind: "recheck", product })),
+      ...newSeedUrls.map((url): WorkItem => ({ kind: "discover", url })),
+      ...newDiscoveredUrls.map((url): WorkItem => ({ kind: "discover", url })),
+    ];
+
+    log("info", "worker starting", {
+      worker: workerName,
+      dueCount: dueProducts?.length ?? 0,
+      newSeedCount: newSeedUrls.length,
+      newDiscoveredCount: newDiscoveredUrls.length,
+    });
+
+    if (workItems.length === 0) {
+      await writeRunSummary(db, workerName, retailer.id, startedAt, { status: "success", itemsProcessed: 0, errorMessage: null });
+      log("info", "nothing due, exiting", { worker: workerName });
+      return;
+    }
+
     const result = await runBatch(
       workItems,
       async (item) => {

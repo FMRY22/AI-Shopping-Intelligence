@@ -1,0 +1,45 @@
+import type { Page } from "playwright";
+import type { DiscoverUrlsFn } from "@repo/scraper-core";
+
+/**
+ * Catalog discovery (PRD.md FR-1) for amazon.sa: picks one bestseller/
+ * category listing page per run (rotating so repeated runs gradually cover
+ * different categories instead of hammering the same page) and extracts
+ * product links from it. Amazon's bestseller pages are public, stable,
+ * and list dozens of products per page -- no search query needed.
+ *
+ * ASINs (not full URLs) are the dedupe key: the same product can appear
+ * under several URL variants (tracking params, /gp/product/ vs /dp/, etc.),
+ * so every discovered link is normalized to the canonical
+ * `https://www.amazon.sa/dp/<ASIN>` form before being returned.
+ */
+const CATALOG_PAGES = [
+  "https://www.amazon.sa/gp/bestsellers/electronics",
+  "https://www.amazon.sa/gp/bestsellers/computers",
+  "https://www.amazon.sa/gp/bestsellers/kitchen",
+  "https://www.amazon.sa/gp/bestsellers/appliances",
+  "https://www.amazon.sa/gp/bestsellers/mobile",
+];
+
+const ASIN_PATTERN = /\/(?:dp|gp\/product)\/([A-Z0-9]{10})/;
+
+export const discoverProductUrls: DiscoverUrlsFn = async (page: Page): Promise<string[]> => {
+  // Index is always < CATALOG_PAGES.length, so the lookup can't miss.
+  const catalogUrl = CATALOG_PAGES[Math.floor(Math.random() * CATALOG_PAGES.length)]!;
+  await page.goto(catalogUrl, { waitUntil: "commit", timeout: 45_000 });
+
+  // Cast as a minimal structural type rather than HTMLAnchorElement -- this
+  // package's tsconfig has no DOM lib (it's a Node package), even though
+  // this callback body itself runs in the browser via Playwright.
+  const hrefs = await page
+    .locator("a[href*='/dp/'], a[href*='/gp/product/']")
+    .evaluateAll((elements) => elements.map((el) => (el as unknown as { href: string }).href));
+
+  const asins = new Set<string>();
+  for (const href of hrefs) {
+    const asin = href.match(ASIN_PATTERN)?.[1];
+    if (asin) asins.add(asin);
+  }
+
+  return [...asins].map((asin) => `https://www.amazon.sa/dp/${asin}`);
+};
