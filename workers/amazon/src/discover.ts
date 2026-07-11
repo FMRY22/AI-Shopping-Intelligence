@@ -1,5 +1,5 @@
 import type { Page } from "playwright";
-import type { DiscoverUrlsFn } from "@repo/scraper-core";
+import { log, type DiscoverUrlsFn } from "@repo/scraper-core";
 
 /**
  * Catalog discovery (PRD.md FR-1) for amazon.sa: picks one bestseller/
@@ -41,6 +41,23 @@ export const discoverProductUrls: DiscoverUrlsFn = async (page: Page): Promise<s
   const hrefs = await productLinks.evaluateAll((elements) =>
     elements.map((el) => (el as unknown as { href: string }).href),
   );
+
+  if (hrefs.length === 0) {
+    // Diagnostics for why the listing page yielded nothing -- final URL
+    // (did it redirect to a locale/captcha interstitial?), page title, and
+    // total anchor count on the page (0 would mean the page itself never
+    // rendered; a normal-looking count with 0 /dp/ matches would mean the
+    // markup just isn't what we guessed).
+    const finalUrl = page.url();
+    const title = await page.title().catch(() => "<unreadable>");
+    const totalAnchors = await page.locator("a").count().catch(() => -1);
+    log("warn", "amazon discovery found no product links", {
+      requestedUrl: catalogUrl,
+      finalUrl,
+      title,
+      totalAnchors,
+    });
+  }
 
   const asins = new Set<string>();
   for (const href of hrefs) {
