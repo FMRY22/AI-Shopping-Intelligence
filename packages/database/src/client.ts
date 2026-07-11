@@ -4,9 +4,11 @@ import type { Database } from "./types";
 export type TypedSupabaseClient = SupabaseClient<Database>;
 
 /**
- * Service-role client -- workers only (GitHub Actions jobs). Bypasses RLS
- * entirely, per DEPLOYMENT.md §4: SUPABASE_SERVICE_ROLE_KEY must only ever
- * live in GitHub Actions secrets, never in the browser bundle.
+ * Service-role client -- worker jobs (GitHub Actions) and server-only Next.js
+ * Route Handlers (e.g. apps/web's /api/track), never client components.
+ * Bypasses RLS entirely, per DEPLOYMENT.md §4: SUPABASE_SERVICE_ROLE_KEY must
+ * live only in GitHub Actions secrets and Vercel's server-only env vars,
+ * never in NEXT_PUBLIC_* or anything that reaches the browser bundle.
  */
 export function createServiceClient(): TypedSupabaseClient {
   const url = process.env.SUPABASE_URL;
