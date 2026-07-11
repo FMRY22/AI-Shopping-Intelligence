@@ -1,12 +1,12 @@
 name: worker-noon
 
 on:
-  schedule:
-    # Every 20 minutes, per WORKERS.md §3.2. GitHub Actions' cron floor is
-    # 5 minutes and firing can be delayed under platform load
-    # (ARCHITECTURE.md §6) -- this workflow is a coarse dispatcher only; the
-    # real prioritization happens in the get_due_items() SQL function.
-    - cron: "*/20 * * * *"
+  # Scheduled cron disabled: Noon is network-blocked for GitHub Actions'
+  # IP ranges (confirmed manually -- the same product URL works fine from a
+  # regular residential connection), so every scheduled run fails and spams
+  # failure emails. Kept as workflow_dispatch only until a non-evasive fix
+  # exists (see WORKERS.md's no-evasion principle) or Noon is reachable
+  # again from this runner network.
   workflow_dispatch: {}
 
 jobs:
