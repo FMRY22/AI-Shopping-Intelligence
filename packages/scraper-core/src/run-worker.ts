@@ -92,6 +92,11 @@ export async function runRetailerWorker(config: RetailerWorkerConfig): Promise<v
         newDiscoveredUrls = unknownCandidates
           .filter((url) => !alreadyDiscoveredUrls.has(url))
           .slice(0, maxNewDiscoveries);
+        log("info", "catalog discovery ran", {
+          worker: workerName,
+          rawCandidates: candidates.length,
+          newAfterFilter: newDiscoveredUrls.length,
+        });
       } catch (err) {
         log("warn", "catalog discovery failed, continuing without it", {
           worker: workerName,

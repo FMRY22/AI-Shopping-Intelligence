@@ -28,12 +28,19 @@ export const discoverProductUrls: DiscoverUrlsFn = async (page: Page): Promise<s
   const catalogUrl = CATALOG_PAGES[Math.floor(Math.random() * CATALOG_PAGES.length)]!;
   await page.goto(catalogUrl, { waitUntil: "commit", timeout: 45_000 });
 
+  const productLinks = page.locator("a[href*='/dp/'], a[href*='/gp/product/']");
+  // evaluateAll reads whatever is in the DOM *right now* -- it does not
+  // auto-wait like an action method (the same ".count() doesn't wait"
+  // pitfall hit earlier in select-first.ts). "commit" resolves before the
+  // client-rendered listing paints, so wait for at least one match first.
+  await productLinks.first().waitFor({ state: "attached", timeout: 15_000 }).catch(() => null);
+
   // Cast as a minimal structural type rather than HTMLAnchorElement -- this
   // package's tsconfig has no DOM lib (it's a Node package), even though
   // this callback body itself runs in the browser via Playwright.
-  const hrefs = await page
-    .locator("a[href*='/dp/'], a[href*='/gp/product/']")
-    .evaluateAll((elements) => elements.map((el) => (el as unknown as { href: string }).href));
+  const hrefs = await productLinks.evaluateAll((elements) =>
+    elements.map((el) => (el as unknown as { href: string }).href),
+  );
 
   const asins = new Set<string>();
   for (const href of hrefs) {
