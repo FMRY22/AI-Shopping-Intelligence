@@ -143,6 +143,10 @@ export type Database = {
         Args: { p_retailer_slug: string; p_limit?: number };
         Returns: ProductsRow[];
       };
+      search_products: {
+        Args: { q?: string; p_limit?: number };
+        Returns: ProductsRow[];
+      };
     };
     Enums: Record<string, never>;
     CompositeTypes: Record<string, never>;
