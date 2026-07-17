@@ -133,6 +133,23 @@ async function searchRetailer(browser: Browser, config: RetailerSearchConfig, qu
       const priceText = await textFromFirstMatchIn(card, config.priceSelectors);
       items.push({ url, title, priceText });
     }
+
+    // Diagnostics: config.cardSelectors are unverified first guesses for
+    // Jarir/extra (amazon_sa's are confirmed working). When a retailer
+    // yields nothing, log enough to fix the selectors without needing
+    // another round of screenshots -- final URL (redirect/interstitial?),
+    // page title, matched card count, and how many of those cards actually
+    // had a usable link+title+price vs got dropped along the way.
+    if (items.length === 0) {
+      console.warn("[track] no items extracted", {
+        retailer: config.slug,
+        requestedUrl: config.searchUrl(query),
+        finalUrl: page.url(),
+        title: await page.title().catch(() => "<unreadable>"),
+        cardCount: count,
+      });
+    }
+
     return items;
   } finally {
     await context.close();
@@ -234,6 +251,17 @@ export async function POST(request: Request): Promise<NextResponse> {
     const errors = results
       .map((r, i) => (r.status === "rejected" ? `${RETAILER_CONFIGS[i]!.slug}: ${String(r.reason)}` : null))
       .filter((e): e is string => e !== null);
+
+    console.log(
+      "[track] summary",
+      query,
+      results.map((r, i) => ({
+        retailer: RETAILER_CONFIGS[i]!.slug,
+        status: r.status,
+        saved: r.status === "fulfilled" ? r.value.length : 0,
+        reason: r.status === "rejected" ? String(r.reason) : undefined,
+      })),
+    );
 
     return NextResponse.json({ products, ...(errors.length > 0 ? { partialErrors: errors } : {}) });
   } catch (err) {
