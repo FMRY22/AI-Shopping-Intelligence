@@ -1,0 +1,42 @@
+name: diagnose-retailers
+
+# Throwaway diagnostic, not a product feature: fetches Jarir's and extra's
+# raw search-page HTML directly (no browser) from a runner with real
+# internet access, to tell apart two different failure modes seen in
+# /api/track's [track] summary logs (2026-07-17) -- Jarir returned 0 cards
+# despite a normal page load, extra returned a literal Cloudflare
+# challenge page. Answers: (1) is Jarir's product grid present in
+# server-rendered HTML (selector bug, fixable) or missing entirely
+# (needs JS/longer wait)? (2) does extra block plain curl too, or only
+# the headless browser specifically? To be deleted once answered.
+on:
+  workflow_dispatch:
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Fetch Jarir search page
+        run: |
+          curl -sS -A "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36" \
+            "https://www.jarir.com/sa-en/catalogsearch/result/?q=laptop" \
+            -o jarir.html \
+            -w "\nHTTP_STATUS:%{http_code}\nSIZE:%{size_download}\n"
+          echo "--- product-item occurrences ---"
+          grep -o "product-item" jarir.html | wc -l
+          echo "--- data-product-id / product-card style hints ---"
+          grep -oE "class=\"[^\"]*product[^\"]*\"" jarir.html | sort -u | head -20
+          echo "--- <script id=... type=application/json> hints (client hydration) ---"
+          grep -oE "<script[^>]*type=\"application/json\"[^>]*>" jarir.html | head -5
+
+      - name: Fetch extra search page
+        run: |
+          curl -sS -A "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36" \
+            "https://www.extra.com/en-sa/search/?q=laptop" \
+            -o extra.html \
+            -w "\nHTTP_STATUS:%{http_code}\nSIZE:%{size_download}\n"
+          echo "--- title ---"
+          grep -oE "<title>[^<]*</title>" extra.html || true
+          echo "--- cloudflare hint ---"
+          grep -io "cloudflare\|attention required\|cf-error" extra.html | sort -u | head -5
