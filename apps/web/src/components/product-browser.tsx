@@ -85,17 +85,77 @@ function ProductImage({ src, alt }: { src: string | null; alt: string }) {
 function PriceTag({ price, currency }: { price: number | null; currency: string }) {
   if (price == null) return <span className="text-sm text-gray-400 dark:text-white/40">—</span>;
   return (
-    <span className="text-base font-semibold text-gray-900 dark:text-white">
-      {price.toLocaleString()} <span className="text-xs font-normal text-gray-500 dark:text-white/50">{currency}</span>
+    <span className="text-lg font-bold text-gray-900 dark:text-white">
+      {price.toLocaleString()} <span className="text-xs font-medium text-gray-400 dark:text-white/40">{currency}</span>
     </span>
   );
 }
 
 function RetailerBadge({ slug }: { slug: string }) {
   return (
-    <span className="inline-flex items-center rounded-full bg-gray-100 px-2 py-0.5 text-[11px] font-medium text-gray-600 dark:bg-white/10 dark:text-white/70">
+    <span className="inline-flex items-center rounded-full bg-indigo-50 px-2.5 py-0.5 text-[11px] font-semibold text-indigo-600 dark:bg-indigo-500/10 dark:text-indigo-300">
       {retailerLabel(slug)}
     </span>
+  );
+}
+
+function StockPill({ inStock }: { inStock: boolean }) {
+  return (
+    <span
+      className={`absolute left-2 top-2 rounded-full px-2 py-0.5 text-[10px] font-bold shadow-sm backdrop-blur-sm ${
+        inStock
+          ? "bg-emerald-500/90 text-white"
+          : "bg-gray-900/80 text-white dark:bg-white/80 dark:text-gray-900"
+      }`}
+    >
+      {inStock ? "In stock" : "Out of stock"}
+    </span>
+  );
+}
+
+// A floating circular button over the product photo, not a full-width bar
+// below it -- founder feedback (2026-07-17, twice: "still looks primitive",
+// wants it closer to a polished consumer app like Blink) pointed at flat,
+// text-heavy cards as the culprit. Sits as a sibling of the <a> (not
+// nested inside it) so clicking it doesn't also trigger the product-page
+// navigation.
+function FavoriteButton({
+  status,
+  onClick,
+}: {
+  status: "idle" | "saving" | "saved" | "error";
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={status === "saving" || status === "saved"}
+      aria-label="Favorite"
+      className={`absolute right-2 top-2 flex h-8 w-8 items-center justify-center rounded-full shadow-md backdrop-blur-sm transition disabled:cursor-default ${
+        status === "saved"
+          ? "bg-indigo-600 text-white"
+          : status === "error"
+            ? "bg-red-500 text-white"
+            : "bg-white/90 text-gray-700 hover:bg-white hover:text-indigo-600 dark:bg-white/15 dark:text-white dark:hover:bg-white/25"
+      }`}
+    >
+      {status === "saving" ? (
+        <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-current border-t-transparent" />
+      ) : status === "saved" ? (
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} className="h-4 w-4">
+          <path d="M20 6 9 17l-5-5" />
+        </svg>
+      ) : status === "error" ? (
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} className="h-4 w-4">
+          <path d="M12 5v9M12 18v.01" />
+        </svg>
+      ) : (
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="h-4 w-4">
+          <path d="M12 17.3 6.2 21l1.5-6.6L2.5 9.9l6.7-.6L12 3l2.8 6.3 6.7.6-5.2 4.5 1.5 6.6z" />
+        </svg>
+      )}
+    </button>
   );
 }
 
@@ -105,22 +165,18 @@ function TrackedProductCard({ product }: { product: Product }) {
       href={product.url}
       target="_blank"
       rel="noreferrer"
-      className="group flex flex-col overflow-hidden rounded-xl border border-gray-200 bg-white p-3 transition hover:-translate-y-0.5 hover:shadow-md dark:border-white/10 dark:bg-white/[0.03]"
+      className="group flex flex-col overflow-hidden rounded-2xl border border-gray-100 bg-white p-3 shadow-sm transition hover:-translate-y-1 hover:shadow-lg dark:border-white/10 dark:bg-white/[0.03]"
     >
-      <ProductImage src={product.image_url} alt={product.title_en} />
+      <div className="relative">
+        <ProductImage src={product.image_url} alt={product.title_en} />
+        <StockPill inStock={product.in_stock} />
+      </div>
       <div className="mt-3 flex flex-1 flex-col gap-2">
-        <p className="line-clamp-2 min-h-[2.5rem] text-sm font-medium text-gray-900 group-hover:underline dark:text-white">
+        <p className="line-clamp-2 min-h-[2.5rem] text-sm font-medium text-gray-900 group-hover:text-indigo-600 dark:text-white dark:group-hover:text-indigo-300">
           {product.title_en}
         </p>
-        <div className="mt-auto flex items-center justify-between gap-2">
+        <div className="mt-auto">
           <PriceTag price={product.current_price} currency={product.currency} />
-          <span
-            className={`text-[11px] font-medium ${
-              product.in_stock ? "text-emerald-600 dark:text-emerald-400" : "text-red-500 dark:text-red-400"
-            }`}
-          >
-            {product.in_stock ? "In stock" : "Out of stock"}
-          </span>
         </div>
       </div>
     </a>
@@ -137,10 +193,15 @@ function LiveResultCard({
   status: "idle" | "saving" | "saved" | "error";
 }) {
   return (
-    <div className="flex flex-col overflow-hidden rounded-xl border border-gray-200 bg-white p-3 transition hover:shadow-md dark:border-white/10 dark:bg-white/[0.03]">
+    <div className="flex flex-col overflow-hidden rounded-2xl border border-gray-100 bg-white p-3 shadow-sm transition hover:shadow-lg dark:border-white/10 dark:bg-white/[0.03]">
+      <div className="relative">
+        <a href={result.url} target="_blank" rel="noreferrer" className="block">
+          <ProductImage src={result.imageUrl} alt={result.title} />
+        </a>
+        <FavoriteButton status={status} onClick={onFavorite} />
+      </div>
       <a href={result.url} target="_blank" rel="noreferrer" className="group">
-        <ProductImage src={result.imageUrl} alt={result.title} />
-        <p className="mt-3 line-clamp-2 min-h-[2.5rem] text-sm font-medium text-gray-900 group-hover:underline dark:text-white">
+        <p className="mt-3 line-clamp-2 min-h-[2.5rem] text-sm font-medium text-gray-900 group-hover:text-indigo-600 dark:text-white dark:group-hover:text-indigo-300">
           {result.title}
         </p>
       </a>
@@ -148,36 +209,14 @@ function LiveResultCard({
         <RetailerBadge slug={result.retailerSlug} />
         <PriceTag price={result.price} currency={result.currency} />
       </div>
-      <button
-        type="button"
-        onClick={onFavorite}
-        disabled={status === "saving" || status === "saved"}
-        className={`mt-3 flex w-full items-center justify-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium transition disabled:cursor-default ${
-          status === "saved"
-            ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-400"
-            : status === "error"
-              ? "bg-red-50 text-red-600 dark:bg-red-500/10 dark:text-red-400"
-              : "bg-indigo-600 text-white hover:bg-indigo-500 dark:bg-indigo-500 dark:hover:bg-indigo-400"
-        }`}
-      >
-        {status === "saved" ? (
-          <>✓ Favorited / أُضيف</>
-        ) : status === "saving" ? (
-          "…"
-        ) : status === "error" ? (
-          "Failed — retry / حاول مجدداً"
-        ) : (
-          <>☆ Favorite / تفضيل</>
-        )}
-      </button>
     </div>
   );
 }
 
 function SectionLabel({ children }: { children: React.ReactNode }) {
   return (
-    <p className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-gray-400 dark:text-white/30">
-      <span className="h-1.5 w-1.5 rounded-full bg-indigo-500" />
+    <p className="flex items-center gap-1.5 text-sm font-bold text-gray-900 dark:text-white">
+      <span className="h-2 w-2 rounded-full bg-indigo-500" />
       {children}
     </p>
   );
@@ -294,7 +333,7 @@ export function ProductBrowser({ initialProducts }: { initialProducts: Product[]
         className="flex gap-2"
       >
         <div className="relative w-full">
-          <span className="pointer-events-none absolute inset-y-0 left-3 flex items-center text-gray-400 dark:text-white/40">
+          <span className="pointer-events-none absolute inset-y-0 left-4 flex items-center text-gray-400 dark:text-white/40">
             <SearchIcon />
           </span>
           <input
@@ -303,13 +342,13 @@ export function ProductBrowser({ initialProducts }: { initialProducts: Product[]
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Search products... / ابحث عن منتج..."
             dir="auto"
-            className="w-full rounded-xl border border-gray-200 bg-white py-2.5 pl-9 pr-4 text-sm text-gray-900 shadow-sm outline-none transition placeholder:text-gray-400 focus:border-indigo-400 focus:ring-2 focus:ring-indigo-500/15 dark:border-white/10 dark:bg-white/5 dark:text-white dark:placeholder:text-white/30 dark:focus:border-indigo-400"
+            className="w-full rounded-full border border-gray-200 bg-white py-3.5 pl-11 pr-4 text-[15px] text-gray-900 shadow-sm outline-none transition placeholder:text-gray-400 focus:border-indigo-400 focus:ring-4 focus:ring-indigo-500/10 dark:border-white/10 dark:bg-white/5 dark:text-white dark:placeholder:text-white/30 dark:focus:border-indigo-400"
           />
         </div>
         <button
           type="submit"
           disabled={!query.trim() || isTracking}
-          className="shrink-0 rounded-xl bg-indigo-600 px-5 py-2.5 text-sm font-medium text-white shadow-sm transition hover:bg-indigo-500 disabled:cursor-default disabled:opacity-40 dark:bg-indigo-500 dark:hover:bg-indigo-400"
+          className="shrink-0 rounded-full bg-indigo-600 px-6 py-3.5 text-[15px] font-semibold text-white shadow-sm shadow-indigo-600/20 transition hover:bg-indigo-500 disabled:cursor-default disabled:opacity-40 dark:bg-indigo-500 dark:hover:bg-indigo-400"
         >
           {isTracking ? "…" : "Search live / ابحث"}
         </button>
@@ -334,7 +373,7 @@ export function ProductBrowser({ initialProducts }: { initialProducts: Product[]
       {liveResults.length > 0 && (
         <div className="mt-8">
           <SectionLabel>Live results — tap Favorite to track / نتائج حية — اضغط تفضيل للمتابعة</SectionLabel>
-          <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
+          <div className="mt-4 grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
             {liveResults.map((result) => (
               <LiveResultCard
                 key={`${result.retailerSlug}:${result.url}`}
@@ -349,7 +388,7 @@ export function ProductBrowser({ initialProducts }: { initialProducts: Product[]
 
       <div className="mt-8">
         {products.length > 0 && <SectionLabel>Tracked / متابَع</SectionLabel>}
-        <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
+        <div className="mt-4 grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
           {products.map((product) => (
             <TrackedProductCard key={product.id} product={product} />
           ))}
