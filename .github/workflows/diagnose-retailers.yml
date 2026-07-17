@@ -26,4 +26,8 @@ jobs:
               -A "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36" \
               -o page.html -w "HTTP_STATUS:%{http_code} SIZE:%{size_download}\n"
             grep -oE '<meta[^>]*property="og:image"[^>]*>' page.html | head -2 || echo "no og:image found"
+            echo "--- landingImage / data-a-dynamic-image / data-old-hires hints ---"
+            grep -oE 'id="landingImage"[^>]{0,300}' page.html | head -1 || true
+            grep -oE 'data-old-hires="[^"]*"' page.html | head -1 || true
+            grep -oE '"hiRes":"[^"]*"' page.html | head -1 || true
           done
