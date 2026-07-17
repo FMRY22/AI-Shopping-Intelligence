@@ -2,17 +2,17 @@ import { NextResponse } from "next/server";
 import { chromium as playwright } from "playwright-core";
 import chromium from "@sparticuz/chromium-min";
 import type { Browser, Locator, Page } from "playwright-core";
-import { createServiceClient, type Product, type TypedSupabaseClient } from "@repo/database";
 import { parsePrice } from "@repo/shared";
 
 // POST /api/track (PRD.md FR-18/FR-1): the "search for anything" path.
 // GET /api/search only looks inside products we've already collected --
 // this route is what makes a not-yet-seen product show up: it opens a real
-// browser at request time, live-searches every configured retailer at
-// once, and saves any matches so the normal scheduled worker
-// (packages/scraper-core's runRetailerWorker) picks them up for ongoing
-// price tracking afterward. Confirmed working end-to-end for Amazon
-// (2026-07-17); Jarir/extra search-results-page selectors below are
+// browser at request time and live-searches every configured retailer at
+// once. Purely a live lookup -- it does NOT write to the database. Nothing
+// gets tracked just because it showed up in a search; the founder wants
+// that to require a deliberate action, so saving is POST /api/favorite's
+// job, triggered per-result from the UI. Confirmed working end-to-end for
+// Amazon (2026-07-17); Jarir/extra search-results-page selectors below are
 // first-guess, unverified against the live sites -- same situation their
 // product-page selectors started in (see workers/jarir and workers/extra's
 // selectors.ts header comments), expect a live debugging round.
@@ -36,6 +36,14 @@ interface FoundItem {
   url: string;
   title: string;
   priceText: string | null;
+}
+
+export interface LiveSearchResult {
+  retailerSlug: string;
+  url: string;
+  title: string;
+  price: number;
+  currency: string;
 }
 
 interface RetailerSearchConfig {
@@ -168,81 +176,12 @@ async function searchRetailer(browser: Browser, config: RetailerSearchConfig, qu
   }
 }
 
-function deriveProductId(url: string): string {
-  return url.split("/").filter(Boolean).pop() ?? url;
-}
-
-async function saveFoundItems(
-  db: TypedSupabaseClient,
-  retailerId: string,
-  items: FoundItem[],
-): Promise<Product[]> {
-  const products: Product[] = [];
-  for (const item of items) {
-    const parsed = item.priceText ? parsePrice(item.priceText) : null;
-    if (!parsed) continue;
-
-    const retailerProductId = deriveProductId(item.url);
-    const { data: existing } = await db
-      .from("products")
-      .select("*")
-      .eq("retailer_id", retailerId)
-      .eq("retailer_product_id", retailerProductId)
-      .maybeSingle();
-
-    if (existing) {
-      products.push(existing);
-      continue;
-    }
-
-    const { data: inserted, error: insertError } = await db
-      .from("products")
-      .insert({
-        retailer_id: retailerId,
-        retailer_product_id: retailerProductId,
-        url: item.url,
-        title_en: item.title,
-        current_price: parsed.amount,
-        currency: parsed.currency,
-        in_stock: true,
-        last_checked_at: new Date().toISOString(),
-        next_due_at: new Date().toISOString(),
-        source: "user_search",
-      })
-      .select()
-      .single();
-    if (insertError || !inserted) continue;
-
-    await db.from("price_history").insert({
-      product_id: inserted.id,
-      price: parsed.amount,
-      currency: parsed.currency,
-      in_stock: true,
-    });
-    products.push(inserted);
-  }
-  return products;
-}
-
 export async function POST(request: Request): Promise<NextResponse> {
   const body = (await request.json().catch(() => null)) as { query?: string } | null;
   const query = body?.query?.trim();
   if (!query) {
     return NextResponse.json({ error: "query is required" }, { status: 400 });
   }
-
-  const db = createServiceClient();
-  const { data: retailers, error: retailersError } = await db
-    .from("retailers")
-    .select("*")
-    .in(
-      "slug",
-      RETAILER_CONFIGS.map((c) => c.slug),
-    );
-  if (retailersError || !retailers || retailers.length === 0) {
-    return NextResponse.json({ error: "no configured retailers found" }, { status: 500 });
-  }
-  const retailerBySlug = new Map(retailers.map((r) => [r.slug, r]));
 
   const browser = await playwright.launch({
     args: chromium.args,
@@ -253,14 +192,18 @@ export async function POST(request: Request): Promise<NextResponse> {
   try {
     const results = await Promise.allSettled(
       RETAILER_CONFIGS.map(async (config) => {
-        const retailer = retailerBySlug.get(config.slug);
-        if (!retailer) return [];
         const found = await searchRetailer(browser, config, query);
-        return saveFoundItems(db, retailer.id, found);
+        const withPrice: LiveSearchResult[] = [];
+        for (const item of found) {
+          const parsed = item.priceText ? parsePrice(item.priceText) : null;
+          if (!parsed) continue;
+          withPrice.push({ retailerSlug: config.slug, url: item.url, title: item.title, price: parsed.amount, currency: parsed.currency });
+        }
+        return withPrice;
       }),
     );
 
-    const products = results.flatMap((r) => (r.status === "fulfilled" ? r.value : []));
+    const liveResults = results.flatMap((r) => (r.status === "fulfilled" ? r.value : []));
     const errors = results
       .map((r, i) => (r.status === "rejected" ? `${RETAILER_CONFIGS[i]!.slug}: ${String(r.reason)}` : null))
       .filter((e): e is string => e !== null);
@@ -271,12 +214,12 @@ export async function POST(request: Request): Promise<NextResponse> {
       results.map((r, i) => ({
         retailer: RETAILER_CONFIGS[i]!.slug,
         status: r.status,
-        saved: r.status === "fulfilled" ? r.value.length : 0,
+        found: r.status === "fulfilled" ? r.value.length : 0,
         reason: r.status === "rejected" ? String(r.reason) : undefined,
       })),
     );
 
-    return NextResponse.json({ products, ...(errors.length > 0 ? { partialErrors: errors } : {}) });
+    return NextResponse.json({ results: liveResults, ...(errors.length > 0 ? { partialErrors: errors } : {}) });
   } catch (err) {
     return NextResponse.json(
       { error: `live search failed: ${err instanceof Error ? err.message : String(err)}` },
