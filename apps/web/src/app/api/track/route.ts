@@ -6,16 +6,16 @@ import { parsePrice } from "@repo/shared";
 
 // POST /api/track (PRD.md FR-18/FR-1): the "search for anything" path.
 // GET /api/search only looks inside products we've already collected --
-// this route is what makes a not-yet-seen product show up: it opens a real
-// browser at request time and live-searches every configured retailer at
-// once. Purely a live lookup -- it does NOT write to the database. Nothing
-// gets tracked just because it showed up in a search; the founder wants
-// that to require a deliberate action, so saving is POST /api/favorite's
-// job, triggered per-result from the UI. Confirmed working end-to-end for
-// Amazon (2026-07-17, live GitHub Actions test call, real untruncated
-// titles). Jarir and extra are known gaps, for two different reasons --
-// see each one's cardSelectors comment below -- and both fail safely
-// (0 results, logged, no crash) rather than surface wrong data.
+// this route is what makes a not-yet-seen product show up: it live-searches
+// every configured retailer at once, either via a real browser (amazon_sa,
+// extra) or a direct JSON API call (jarir, see searchJarirViaApi). Purely a
+// live lookup -- it does NOT write to the database. Nothing gets tracked
+// just because it showed up in a search; the founder wants that to require
+// a deliberate action, so saving is POST /api/favorite's job, triggered
+// per-result from the UI. Confirmed working end-to-end for Amazon and Jarir
+// (2026-07-17, live GitHub Actions test calls, real per-query results).
+// extra is a known gap -- see its cardSelectors comment below -- and fails
+// safely (0 results, logged, no crash) rather than surface wrong data.
 export const runtime = "nodejs";
 export const maxDuration = 60;
 
@@ -77,25 +77,6 @@ const RETAILER_CONFIGS: RetailerSearchConfig[] = [
     // is the one selector that reliably gets the full text either way.
     titleSelectors: ["h2", "h2 a"],
     priceSelectors: [".a-price .a-offscreen", ".a-price"],
-  },
-  {
-    slug: "jarir",
-    searchUrl: (q) => `https://www.jarir.com/sa-en/catalogsearch/result/?q=${encodeURIComponent(q)}`,
-    // Deliberately unmatchable -- see the header comment above on why. A
-    // prior attempt used ".product-tile" (jarir's real class name,
-    // confirmed via curl), but a follow-up probe proved those tiles are a
-    // static "trending now" widget baked into the page shell: three
-    // completely different queries (laptop/hp/iphone) returned the exact
-    // same 12 products in the exact same order (2026-07-17). That's worse
-    // than finding nothing -- it silently hands back confident, wrong
-    // results. Jarir's real per-query results come from a client-side API
-    // call this static markup never exposes; finding that endpoint is a
-    // separate task, not a selector tweak. Until then, fail safely (0
-    // results, same as extra) rather than lie.
-    cardSelectors: ["__jarir_live_search_not_yet_supported__"],
-    linkSelectors: ["a[href]"],
-    titleSelectors: ["h2"],
-    priceSelectors: ['[class*="price"]'],
   },
   {
     slug: "extra",
@@ -244,6 +225,48 @@ async function searchRetailer(config: RetailerSearchConfig, query: string): Prom
   }
 }
 
+const JARIR_CONSTRUCTOR_KEY = "key_KcSYfmQTEwRpBnd9";
+
+interface ConstructorSearchResult {
+  value?: string;
+  data?: { url?: string; price?: number };
+}
+
+// Jarir's own search box is powered by Constructor.io (a third-party
+// search/discovery SaaS), not their Magento/Elasticsearch product API --
+// confirmed by capturing real network traffic during a live search
+// (2026-07-17). The obvious-looking `/api/catalogv2/product/.../q/{term}/...`
+// REST endpoint is shaped exactly like a search API but doesn't actually
+// filter by query at all: "laptop" and "hp" returned byte-identical
+// results (a static "trending now" set). This Constructor.io endpoint is
+// the real thing -- verified "laptop" vs "hp" return different, correctly
+// on-topic products. It's a plain public JSON API, so Jarir needs no
+// browser at all: faster and more reliable than the Playwright path used
+// for amazon_sa/extra.
+async function searchJarirViaApi(query: string): Promise<LiveSearchResult[]> {
+  const url = `https://ac.cnstrc.com/search/${encodeURIComponent(query)}?key=${JARIR_CONSTRUCTOR_KEY}&c=cio-fe-web-jarir&s=1&num_results_per_page=${MAX_RESULTS_PER_RETAILER}`;
+  const res = await fetch(url, { headers: { Accept: "application/json" } });
+  if (!res.ok) throw new Error(`jarir search API returned ${res.status}`);
+  const data = (await res.json()) as { response?: { results?: ConstructorSearchResult[] } };
+  const results = data.response?.results ?? [];
+
+  const items: LiveSearchResult[] = [];
+  for (const r of results.slice(0, MAX_RESULTS_PER_RETAILER)) {
+    const title = r.value?.trim();
+    const relativeUrl = r.data?.url;
+    const price = r.data?.price;
+    if (!title || !relativeUrl || typeof price !== "number") continue;
+    items.push({
+      retailerSlug: "jarir",
+      url: `https://www.jarir.com/sa-en/${relativeUrl}`,
+      title,
+      price,
+      currency: "SAR",
+    });
+  }
+  return items;
+}
+
 export async function POST(request: Request): Promise<NextResponse> {
   const body = (await request.json().catch(() => null)) as { query?: string } | null;
   const query = body?.query?.trim();
@@ -251,9 +274,19 @@ export async function POST(request: Request): Promise<NextResponse> {
     return NextResponse.json({ error: "query is required" }, { status: 400 });
   }
 
-  // Sequential, each with its own browser (see searchRetailer's comment).
   const summary: { retailer: string; status: "fulfilled" | "rejected"; found: number; reason?: string }[] = [];
   const liveResults: LiveSearchResult[] = [];
+
+  // A plain HTTP call, done before spinning up any browser.
+  try {
+    const jarirResults = await searchJarirViaApi(query);
+    liveResults.push(...jarirResults);
+    summary.push({ retailer: "jarir", status: "fulfilled", found: jarirResults.length });
+  } catch (err) {
+    summary.push({ retailer: "jarir", status: "rejected", found: 0, reason: err instanceof Error ? err.message : String(err) });
+  }
+
+  // Sequential, each with its own browser (see searchRetailer's comment).
   for (const config of RETAILER_CONFIGS) {
     try {
       const found = await searchRetailer(config, query);
