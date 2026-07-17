@@ -20,6 +20,41 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
+      - name: Verify the real Jarir search API directly (no browser)
+        run: |
+          for q in laptop hp; do
+            echo "=== q=$q ==="
+            curl -sS "https://www.jarir.com/api/catalogv2/product/store/sa-en/category_ids/5/q/$q/aggregation/true/size/12/sort-priority/asc" \
+              -H "Accept: application/json" \
+              -o "api-$q.json" -w "HTTP_STATUS:%{http_code}\nSIZE:%{size_download}\n"
+            python3 - "$q" <<'PY'
+          import json, sys
+          q = sys.argv[1]
+          try:
+              data = json.load(open(f"api-{q}.json", encoding="utf-8"))
+          except Exception as e:
+              print("JSON parse failed:", e)
+              print(open(f"api-{q}.json", encoding="utf-8", errors="replace").read()[:500])
+              raise SystemExit
+          print("top-level keys:", list(data.keys()) if isinstance(data, dict) else type(data))
+          # try to find a products/items list heuristically
+          def find_list(obj, depth=0):
+              if depth > 4: return None
+              if isinstance(obj, list) and obj and isinstance(obj[0], dict) and any(k in obj[0] for k in ("name","title","sku","price")):
+                  return obj
+              if isinstance(obj, dict):
+                  for v in obj.values():
+                      r = find_list(v, depth+1)
+                      if r: return r
+              return None
+          items = find_list(data)
+          print("found items:", len(items) if items else 0)
+          if items:
+              for it in items[:5]:
+                  print(" -", {k: it[k] for k in it if k in ("name","title","sku","price","url","urlKey","url_key")})
+          PY
+          done
+
       - uses: actions/setup-node@v4
         with:
           node-version: 20
