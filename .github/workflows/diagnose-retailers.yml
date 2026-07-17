@@ -32,11 +32,13 @@ jobs:
 
       - name: Fetch extra search page
         run: |
-          curl -sS -A "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36" \
+          curl -sS -L -D extra-headers.txt -A "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36" \
             "https://www.extra.com/en-sa/search/?q=laptop" \
             -o extra.html \
-            -w "\nHTTP_STATUS:%{http_code}\nSIZE:%{size_download}\n"
+            -w "\nHTTP_STATUS:%{http_code}\nSIZE:%{size_download}\nFINAL_URL:%{url_effective}\n"
+          echo "--- redirect chain / headers ---"
+          cat extra-headers.txt
           echo "--- title ---"
           grep -oE "<title>[^<]*</title>" extra.html || true
           echo "--- cloudflare hint ---"
-          grep -io "cloudflare\|attention required\|cf-error" extra.html | sort -u | head -5
+          grep -io "cloudflare\|attention required\|cf-error\|cf-mitigated\|just a moment" extra.html | sort -u | head -5
