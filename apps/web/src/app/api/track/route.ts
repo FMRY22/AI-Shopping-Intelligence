@@ -128,10 +128,18 @@ async function searchRetailer(browser: Browser, config: RetailerSearchConfig, qu
   try {
     await page.goto(config.searchUrl(query), { waitUntil: "commit", timeout: 30_000 });
 
+    // Only the first selector gets the full wait -- once the page has had a
+    // real chance to render, checking further fallback selectors doesn't
+    // need another full wait each. Without this, a retailer whose selectors
+    // never match burns CARD_WAIT_TIMEOUT_MS per candidate (up to 45s across
+    // 3 fallbacks), which combined with 3 retailers running concurrently
+    // was enough to blow past maxDuration and abort the whole request
+    // (seen live 2026-07-17: "browserContext.close: ...has been closed").
     let cards = page.locator(config.cardSelectors[0]!);
-    for (const selector of config.cardSelectors) {
-      const candidate = page.locator(selector);
-      await candidate.first().waitFor({ state: "attached", timeout: CARD_WAIT_TIMEOUT_MS }).catch(() => null);
+    for (let i = 0; i < config.cardSelectors.length; i++) {
+      const candidate = page.locator(config.cardSelectors[i]!);
+      const waitTimeout = i === 0 ? CARD_WAIT_TIMEOUT_MS : 2_000;
+      await candidate.first().waitFor({ state: "attached", timeout: waitTimeout }).catch(() => null);
       if ((await candidate.count().catch(() => 0)) > 0) {
         cards = candidate;
         break;
@@ -165,12 +173,17 @@ async function searchRetailer(browser: Browser, config: RetailerSearchConfig, qu
     // page title, matched card count, and how many of those cards actually
     // had a usable link+title+price vs got dropped along the way.
     if (items.length === 0) {
+      const sampleHrefs = await page
+        .locator("a")
+        .evaluateAll((elements) => elements.slice(0, 15).map((el) => (el as unknown as { href: string }).href))
+        .catch((err: unknown) => [`<evaluateAll failed: ${err instanceof Error ? err.message : String(err)}>`]);
       console.warn("[track] no items extracted", {
         retailer: config.slug,
         requestedUrl: config.searchUrl(query),
         finalUrl: page.url(),
-        title: await page.title().catch(() => "<unreadable>"),
+        title: await page.title().catch((err: unknown) => `<title() failed: ${err instanceof Error ? err.message : String(err)}>`),
         cardCount: count,
+        sampleHrefs,
       });
     }
 
