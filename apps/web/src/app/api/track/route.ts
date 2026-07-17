@@ -12,15 +12,10 @@ import { parsePrice } from "@repo/shared";
 // gets tracked just because it showed up in a search; the founder wants
 // that to require a deliberate action, so saving is POST /api/favorite's
 // job, triggered per-result from the UI. Confirmed working end-to-end for
-// Amazon and Jarir (2026-07-17, verified via a curl probe of the live
-// search HTML -- see jarir's cardSelectors comment below). extra is a
-// known gap: Cloudflare's bot-detection serves our headless browser a
-// challenge page ("Attention Required") on the search URL, even though a
-// plain curl request to the same URL is not challenged -- it's specifically
-// fingerprinting the automated browser, not blocking the IP/route in
-// general. Not worth chasing with stealth/fingerprint-spoofing techniques;
-// extra fails gracefully (0 results, logged, no crash) until/unless that
-// changes.
+// Amazon (2026-07-17, live GitHub Actions test call, real untruncated
+// titles). Jarir and extra are known gaps, for two different reasons --
+// see each one's cardSelectors comment below -- and both fail safely
+// (0 results, logged, no crash) rather than surface wrong data.
 export const runtime = "nodejs";
 export const maxDuration = 60;
 
@@ -86,18 +81,34 @@ const RETAILER_CONFIGS: RetailerSearchConfig[] = [
   {
     slug: "jarir",
     searchUrl: (q) => `https://www.jarir.com/sa-en/catalogsearch/result/?q=${encodeURIComponent(q)}`,
-    // Confirmed against real server-rendered HTML (2026-07-17, curl probe of
-    // the live search page) -- "product-item" (the prior guess, borrowed
-    // from a typical Magento theme) doesn't exist on this page at all;
-    // Jarir's actual grid uses a "product-tile" BEM-style naming scheme.
-    cardSelectors: [".product-tile", "[class*='product-tile']"],
-    linkSelectors: [".product-tile__link", "a[href]"],
-    titleSelectors: [".product-title", "[class*='product-title']"],
-    priceSelectors: [".product-tile__price", '[class*="price"]'],
+    // Deliberately unmatchable -- see the header comment above on why. A
+    // prior attempt used ".product-tile" (jarir's real class name,
+    // confirmed via curl), but a follow-up probe proved those tiles are a
+    // static "trending now" widget baked into the page shell: three
+    // completely different queries (laptop/hp/iphone) returned the exact
+    // same 12 products in the exact same order (2026-07-17). That's worse
+    // than finding nothing -- it silently hands back confident, wrong
+    // results. Jarir's real per-query results come from a client-side API
+    // call this static markup never exposes; finding that endpoint is a
+    // separate task, not a selector tweak. Until then, fail safely (0
+    // results, same as extra) rather than lie.
+    cardSelectors: ["__jarir_live_search_not_yet_supported__"],
+    linkSelectors: ["a[href]"],
+    titleSelectors: ["h2"],
+    priceSelectors: ['[class*="price"]'],
   },
   {
     slug: "extra",
     searchUrl: (q) => `https://www.extra.com/en-sa/search/?q=${encodeURIComponent(q)}`,
+    // Cloudflare's bot-detection serves our headless browser a challenge
+    // page ("Attention Required") on this exact URL, confirmed 2026-07-17
+    // by comparing a plain curl request (200, no challenge) against the
+    // live Playwright run (challenge page, 0 items) -- it's fingerprinting
+    // the automated browser specifically, not blocking the route/IP in
+    // general. Not chasing this with stealth/fingerprint-spoofing
+    // techniques; these selectors are unverified guesses that will simply
+    // find nothing until/unless that changes, same safe-failure outcome
+    // as jarir below.
     cardSelectors: [
       "[data-testid='product-card']",
       "[data-testid*='product']",
