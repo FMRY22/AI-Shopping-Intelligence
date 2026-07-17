@@ -1,17 +1,21 @@
 import { NextResponse } from "next/server";
 import { chromium as playwright } from "playwright-core";
 import chromium from "@sparticuz/chromium-min";
-import type { Page } from "playwright-core";
-import { createServiceClient, type Product } from "@repo/database";
+import type { Browser, Locator, Page } from "playwright-core";
+import { createServiceClient, type Product, type TypedSupabaseClient } from "@repo/database";
 import { parsePrice } from "@repo/shared";
 
 // POST /api/track (PRD.md FR-18/FR-1): the "search for anything" path.
 // GET /api/search only looks inside products we've already collected --
 // this route is what makes a not-yet-seen product show up: it opens a real
-// browser at request time, searches the retailer directly, and saves any
-// matches so the normal scheduled worker (packages/scraper-core's
-// runRetailerWorker) picks them up for ongoing price tracking afterward.
-// Amazon only for this first slice; same pattern extends to Jarir/extra.
+// browser at request time, live-searches every configured retailer at
+// once, and saves any matches so the normal scheduled worker
+// (packages/scraper-core's runRetailerWorker) picks them up for ongoing
+// price tracking afterward. Confirmed working end-to-end for Amazon
+// (2026-07-17); Jarir/extra search-results-page selectors below are
+// first-guess, unverified against the live sites -- same situation their
+// product-page selectors started in (see workers/jarir and workers/extra's
+// selectors.ts header comments), expect a live debugging round.
 export const runtime = "nodejs";
 export const maxDuration = 60;
 
@@ -24,106 +28,137 @@ export const maxDuration = 60;
 const CHROMIUM_PACK_URL =
   "https://github.com/Sparticuz/chromium/releases/download/v149.0.0/chromium-v149.0.0-pack.x64.tar";
 
-const SEARCH_URL = (q: string) => `https://www.amazon.sa/s?k=${encodeURIComponent(q)}`;
-const MAX_RESULTS = 5;
-
-const TITLE_SELECTORS = ["h2 a span", "h2 span", "h2"];
-const PRICE_SELECTORS = [".a-price .a-offscreen", ".a-price"];
+const MAX_RESULTS_PER_RETAILER = 5;
+const CARD_WAIT_TIMEOUT_MS = 15_000;
+const FIELD_TIMEOUT_MS = 3_000;
 
 interface FoundItem {
-  asin: string;
+  url: string;
   title: string;
   priceText: string | null;
 }
 
-async function launchAmazonPage(): Promise<{ browser: Awaited<ReturnType<typeof playwright.launch>>; page: Page }> {
-  const browser = await playwright.launch({
-    args: chromium.args,
-    executablePath: await chromium.executablePath(CHROMIUM_PACK_URL),
-    headless: true,
-  });
+interface RetailerSearchConfig {
+  slug: string;
+  searchUrl: (q: string) => string;
+  cardSelectors: string[];
+  linkSelectors: string[];
+  titleSelectors: string[];
+  priceSelectors: string[];
+}
+
+const RETAILER_CONFIGS: RetailerSearchConfig[] = [
+  {
+    slug: "amazon_sa",
+    searchUrl: (q) => `https://www.amazon.sa/s?k=${encodeURIComponent(q)}`,
+    cardSelectors: ["div[data-component-type='s-search-result']"],
+    linkSelectors: ["h2 a"],
+    titleSelectors: ["h2 a span", "h2 span", "h2"],
+    priceSelectors: [".a-price .a-offscreen", ".a-price"],
+  },
+  {
+    slug: "jarir",
+    searchUrl: (q) => `https://www.jarir.com/sa-en/catalogsearch/result/?q=${encodeURIComponent(q)}`,
+    cardSelectors: ["li.product-item", ".product-item", "[class*='product-item']"],
+    linkSelectors: ["a.product-item-link", "h2 a", "a[href]"],
+    titleSelectors: ["a.product-item-link", "h2", "[class*='product-name']"],
+    priceSelectors: ['[itemprop="price"]', ".price-box .price", '[class*="price"]'],
+  },
+  {
+    slug: "extra",
+    searchUrl: (q) => `https://www.extra.com/en-sa/search/?q=${encodeURIComponent(q)}`,
+    cardSelectors: [
+      "[data-testid='product-card']",
+      "[data-testid*='product']",
+      "div[class*='product-card']",
+      "li[class*='product']",
+    ],
+    linkSelectors: ["a[href*='/p/']", "a[href]"],
+    titleSelectors: ["[data-testid='product-title']", "h3", "[class*='product-name']"],
+    priceSelectors: ["[data-testid='product-price']", '[itemprop="price"]', '[class*="price"]'],
+  },
+];
+
+async function textFromFirstMatchIn(scope: Locator, selectors: string[]): Promise<string | null> {
+  for (const selector of selectors) {
+    const text = (await scope.locator(selector).first().textContent({ timeout: FIELD_TIMEOUT_MS }).catch(() => null))?.trim();
+    if (text) return text;
+  }
+  return null;
+}
+
+async function urlFromFirstMatchIn(scope: Locator, page: Page, selectors: string[]): Promise<string | null> {
+  for (const selector of selectors) {
+    const href = await scope.locator(selector).first().getAttribute("href", { timeout: FIELD_TIMEOUT_MS }).catch(() => null);
+    if (href) {
+      try {
+        return new URL(href, page.url()).toString();
+      } catch {
+        continue;
+      }
+    }
+  }
+  return null;
+}
+
+async function searchRetailer(browser: Browser, config: RetailerSearchConfig, query: string): Promise<FoundItem[]> {
   const context = await browser.newContext({
     viewport: { width: 1366, height: 900 },
     extraHTTPHeaders: { "Accept-Language": "en-US,en;q=0.9" },
   });
   const page = await context.newPage();
-  return { browser, page };
-}
-
-async function searchAmazon(query: string): Promise<FoundItem[]> {
-  const { browser, page } = await launchAmazonPage();
   try {
-    await page.goto(SEARCH_URL(query), { waitUntil: "commit", timeout: 30_000 });
+    await page.goto(config.searchUrl(query), { waitUntil: "commit", timeout: 30_000 });
 
-    const cards = page.locator("div[data-component-type='s-search-result']");
-    await cards.first().waitFor({ state: "attached", timeout: 15_000 }).catch(() => null);
-
-    const count = await cards.count();
-    const items: FoundItem[] = [];
-    for (let i = 0; i < Math.min(count, MAX_RESULTS); i++) {
-      const card = cards.nth(i);
-      const asin = await card.getAttribute("data-asin").catch(() => null);
-      if (!asin) continue;
-
-      let title: string | null = null;
-      for (const selector of TITLE_SELECTORS) {
-        title = (await card.locator(selector).first().textContent({ timeout: 3_000 }).catch(() => null))?.trim() ?? null;
-        if (title) break;
+    let cards = page.locator(config.cardSelectors[0]!);
+    for (const selector of config.cardSelectors) {
+      const candidate = page.locator(selector);
+      await candidate.first().waitFor({ state: "attached", timeout: CARD_WAIT_TIMEOUT_MS }).catch(() => null);
+      if ((await candidate.count().catch(() => 0)) > 0) {
+        cards = candidate;
+        break;
       }
+    }
+
+    const count = await cards.count().catch(() => 0);
+    const items: FoundItem[] = [];
+    for (let i = 0; i < Math.min(count, MAX_RESULTS_PER_RETAILER); i++) {
+      const card = cards.nth(i);
+      const url = await urlFromFirstMatchIn(card, page, config.linkSelectors);
+      if (!url) continue;
+
+      const title = await textFromFirstMatchIn(card, config.titleSelectors);
       if (!title) continue;
 
-      let priceText: string | null = null;
-      for (const selector of PRICE_SELECTORS) {
-        priceText = (await card.locator(selector).first().textContent({ timeout: 3_000 }).catch(() => null))?.trim() ?? null;
-        if (priceText) break;
-      }
-
-      items.push({ asin, title, priceText });
+      const priceText = await textFromFirstMatchIn(card, config.priceSelectors);
+      items.push({ url, title, priceText });
     }
     return items;
   } finally {
-    await browser.close();
+    await context.close();
   }
 }
 
-export async function POST(request: Request): Promise<NextResponse> {
-  const body = (await request.json().catch(() => null)) as { query?: string } | null;
-  const query = body?.query?.trim();
-  if (!query) {
-    return NextResponse.json({ error: "query is required" }, { status: 400 });
-  }
+function deriveProductId(url: string): string {
+  return url.split("/").filter(Boolean).pop() ?? url;
+}
 
-  const db = createServiceClient();
-  const { data: retailer, error: retailerError } = await db
-    .from("retailers")
-    .select("*")
-    .eq("slug", "amazon_sa")
-    .single();
-  if (retailerError || !retailer) {
-    return NextResponse.json({ error: "amazon_sa retailer not configured" }, { status: 500 });
-  }
-
-  let found: FoundItem[];
-  try {
-    found = await searchAmazon(query);
-  } catch (err) {
-    return NextResponse.json(
-      { error: `live search failed: ${err instanceof Error ? err.message : String(err)}` },
-      { status: 502 },
-    );
-  }
-
+async function saveFoundItems(
+  db: TypedSupabaseClient,
+  retailerId: string,
+  items: FoundItem[],
+): Promise<Product[]> {
   const products: Product[] = [];
-  for (const item of found) {
+  for (const item of items) {
     const parsed = item.priceText ? parsePrice(item.priceText) : null;
     if (!parsed) continue;
 
-    const url = `https://www.amazon.sa/dp/${item.asin}`;
+    const retailerProductId = deriveProductId(item.url);
     const { data: existing } = await db
       .from("products")
       .select("*")
-      .eq("retailer_id", retailer.id)
-      .eq("retailer_product_id", item.asin)
+      .eq("retailer_id", retailerId)
+      .eq("retailer_product_id", retailerProductId)
       .maybeSingle();
 
     if (existing) {
@@ -134,9 +169,9 @@ export async function POST(request: Request): Promise<NextResponse> {
     const { data: inserted, error: insertError } = await db
       .from("products")
       .insert({
-        retailer_id: retailer.id,
-        retailer_product_id: item.asin,
-        url,
+        retailer_id: retailerId,
+        retailer_product_id: retailerProductId,
+        url: item.url,
         title_en: item.title,
         current_price: parsed.amount,
         currency: parsed.currency,
@@ -156,6 +191,57 @@ export async function POST(request: Request): Promise<NextResponse> {
     });
     products.push(inserted);
   }
+  return products;
+}
 
-  return NextResponse.json({ products });
+export async function POST(request: Request): Promise<NextResponse> {
+  const body = (await request.json().catch(() => null)) as { query?: string } | null;
+  const query = body?.query?.trim();
+  if (!query) {
+    return NextResponse.json({ error: "query is required" }, { status: 400 });
+  }
+
+  const db = createServiceClient();
+  const { data: retailers, error: retailersError } = await db
+    .from("retailers")
+    .select("*")
+    .in(
+      "slug",
+      RETAILER_CONFIGS.map((c) => c.slug),
+    );
+  if (retailersError || !retailers || retailers.length === 0) {
+    return NextResponse.json({ error: "no configured retailers found" }, { status: 500 });
+  }
+  const retailerBySlug = new Map(retailers.map((r) => [r.slug, r]));
+
+  const browser = await playwright.launch({
+    args: chromium.args,
+    executablePath: await chromium.executablePath(CHROMIUM_PACK_URL),
+    headless: true,
+  });
+
+  try {
+    const results = await Promise.allSettled(
+      RETAILER_CONFIGS.map(async (config) => {
+        const retailer = retailerBySlug.get(config.slug);
+        if (!retailer) return [];
+        const found = await searchRetailer(browser, config, query);
+        return saveFoundItems(db, retailer.id, found);
+      }),
+    );
+
+    const products = results.flatMap((r) => (r.status === "fulfilled" ? r.value : []));
+    const errors = results
+      .map((r, i) => (r.status === "rejected" ? `${RETAILER_CONFIGS[i]!.slug}: ${String(r.reason)}` : null))
+      .filter((e): e is string => e !== null);
+
+    return NextResponse.json({ products, ...(errors.length > 0 ? { partialErrors: errors } : {}) });
+  } catch (err) {
+    return NextResponse.json(
+      { error: `live search failed: ${err instanceof Error ? err.message : String(err)}` },
+      { status: 502 },
+    );
+  } finally {
+    await browser.close();
+  }
 }
