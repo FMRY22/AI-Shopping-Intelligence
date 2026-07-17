@@ -36,6 +36,7 @@ interface FoundItem {
   url: string;
   title: string;
   priceText: string | null;
+  imageUrl: string | null;
 }
 
 export interface LiveSearchResult {
@@ -44,6 +45,7 @@ export interface LiveSearchResult {
   title: string;
   price: number;
   currency: string;
+  imageUrl: string | null;
 }
 
 interface RetailerSearchConfig {
@@ -58,6 +60,7 @@ interface RetailerSearchConfig {
   linkSelectors: string[];
   titleSelectors: string[];
   priceSelectors: string[];
+  imageSelectors: string[];
 }
 
 const RETAILER_CONFIGS: RetailerSearchConfig[] = [
@@ -77,6 +80,7 @@ const RETAILER_CONFIGS: RetailerSearchConfig[] = [
     // is the one selector that reliably gets the full text either way.
     titleSelectors: ["h2", "h2 a"],
     priceSelectors: [".a-price .a-offscreen", ".a-price"],
+    imageSelectors: ["img.s-image", "img"],
   },
   {
     slug: "extra",
@@ -99,6 +103,7 @@ const RETAILER_CONFIGS: RetailerSearchConfig[] = [
     linkSelectors: ["a[href*='/p/']", "a[href]"],
     titleSelectors: ["[data-testid='product-title']", "h3", "[class*='product-name']"],
     priceSelectors: ["[data-testid='product-price']", '[itemprop="price"]', '[class*="price"]'],
+    imageSelectors: ["img"],
   },
 ];
 
@@ -118,6 +123,31 @@ async function urlFromFirstMatchIn(scope: Locator, page: Page, selectors: string
         return new URL(href, page.url()).toString();
       } catch {
         continue;
+      }
+    }
+  }
+  return null;
+}
+
+// Blocking the "image" resource type (BLOCKED_RESOURCE_TYPES below) stops
+// our own browser from downloading the bytes, but the <img> tag and its
+// src/data-src attributes are still present in the DOM -- reading the URL
+// string is all this needs; the browser rendering the result for an actual
+// person is the one that fetches it. "src" first, "data-src" as a
+// lazy-load fallback (a blank/placeholder src is common until an
+// IntersectionObserver swaps the real URL in, though search-result images
+// are usually eager since they're above the fold).
+async function imageFromFirstMatchIn(scope: Locator, page: Page, selectors: string[]): Promise<string | null> {
+  for (const selector of selectors) {
+    const el = scope.locator(selector).first();
+    for (const attr of ["src", "data-src"]) {
+      const value = await el.getAttribute(attr, { timeout: FIELD_TIMEOUT_MS }).catch(() => null);
+      if (value && !value.startsWith("data:")) {
+        try {
+          return new URL(value, page.url()).toString();
+        } catch {
+          continue;
+        }
       }
     }
   }
@@ -195,7 +225,8 @@ async function searchRetailer(config: RetailerSearchConfig, query: string): Prom
       if (!title) continue;
 
       const priceText = await textFromFirstMatchIn(card, config.priceSelectors);
-      items.push({ url, title, priceText });
+      const imageUrl = await imageFromFirstMatchIn(card, page, config.imageSelectors);
+      items.push({ url, title, priceText, imageUrl });
     }
 
     // Diagnostics: config.cardSelectors are unverified first guesses for
@@ -229,7 +260,7 @@ const JARIR_CONSTRUCTOR_KEY = "key_KcSYfmQTEwRpBnd9";
 
 interface ConstructorSearchResult {
   value?: string;
-  data?: { url?: string; price?: number };
+  data?: { url?: string; price?: number; image_url?: string };
 }
 
 // Jarir's own search box is powered by Constructor.io (a third-party
@@ -262,6 +293,7 @@ async function searchJarirViaApi(query: string): Promise<LiveSearchResult[]> {
       title,
       price,
       currency: "SAR",
+      imageUrl: r.data?.image_url ?? null,
     });
   }
   return items;
@@ -294,7 +326,14 @@ export async function POST(request: Request): Promise<NextResponse> {
       for (const item of found) {
         const parsed = item.priceText ? parsePrice(item.priceText) : null;
         if (!parsed) continue;
-        liveResults.push({ retailerSlug: config.slug, url: item.url, title: item.title, price: parsed.amount, currency: parsed.currency });
+        liveResults.push({
+          retailerSlug: config.slug,
+          url: item.url,
+          title: item.title,
+          price: parsed.amount,
+          currency: parsed.currency,
+          imageUrl: item.imageUrl,
+        });
         count++;
       }
       summary.push({ retailer: config.slug, status: "fulfilled", found: count });

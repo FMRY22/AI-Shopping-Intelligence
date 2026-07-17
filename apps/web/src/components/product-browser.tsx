@@ -9,28 +9,125 @@ interface LiveResult {
   title: string;
   price: number;
   currency: string;
+  imageUrl: string | null;
 }
 
-function ProductRow({ product }: { product: Product }) {
+const RETAILER_LABELS: Record<string, string> = {
+  amazon_sa: "Amazon.sa",
+  jarir: "Jarir",
+  extra: "extra",
+  noon: "noon",
+};
+
+function retailerLabel(slug: string): string {
+  return RETAILER_LABELS[slug] ?? slug;
+}
+
+// Not a plain <img>: a broken or still-pending <img src> renders its alt
+// text at natural size in a way that escapes normal box clipping in
+// Chromium -- confirmed via a local screenshot where a network-blocked
+// image's full title text overflowed well outside the placeholder box no
+// matter what container CSS (overflow-hidden, absolute positioning) was
+// applied. A CSS background-image has no alt-text fallback to escape with,
+// so the fix is to probe-load the URL off-DOM first (a detached Image()
+// object) and only switch to a background-image once it's confirmed to
+// have loaded successfully; until then (or on failure) the SVG placeholder
+// is all that's ever in the visible tree. Also why not next/image: product
+// images come from whatever CDN each retailer happens to use (Amazon's
+// media CDN, Jarir's Akeneo asset host, extra's...), which next/image
+// would need enumerated up front in next.config's remotePatterns and
+// breaks silently if a retailer changes hosts.
+function ProductImage({ src, alt }: { src: string | null; alt: string }) {
+  const [loadedSrc, setLoadedSrc] = useState<string | null>(null);
+
+  useEffect(() => {
+    setLoadedSrc(null);
+    if (!src) return;
+    const img = new Image();
+    img.referrerPolicy = "no-referrer";
+    img.onload = () => setLoadedSrc(src);
+    img.src = src;
+    return () => {
+      img.onload = null;
+    };
+  }, [src]);
+
+  const showPlaceholder = loadedSrc !== src;
+
   return (
-    <li className="flex items-center justify-between py-4">
-      <div>
-        <a href={product.url} target="_blank" rel="noreferrer" className="font-medium hover:underline">
-          {product.title_en}
-        </a>
-        <p className="text-sm text-gray-500">
-          {product.in_stock ? "In stock" : "Out of stock"} · last checked{" "}
-          {product.last_checked_at ? new Date(product.last_checked_at).toLocaleString() : "never"}
-        </p>
-      </div>
-      <div className="text-lg font-semibold">
-        {product.current_price != null ? `${product.current_price} ${product.currency}` : "—"}
-      </div>
-    </li>
+    <div
+      role="img"
+      aria-label={alt}
+      className="relative aspect-square w-full overflow-hidden rounded-lg bg-gray-50 dark:bg-white/5"
+    >
+      {showPlaceholder ? (
+        <svg
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth={1.25}
+          className="absolute inset-0 m-auto h-10 w-10 text-gray-300 dark:text-white/15"
+        >
+          <rect x="3" y="3" width="18" height="18" rx="2" />
+          <circle cx="9" cy="9" r="1.5" />
+          <path d="M21 15l-5-5-9 9" />
+        </svg>
+      ) : (
+        <div
+          style={{ backgroundImage: `url(${loadedSrc})` }}
+          className="absolute inset-3 bg-contain bg-center bg-no-repeat"
+        />
+      )}
+    </div>
   );
 }
 
-function LiveResultRow({
+function PriceTag({ price, currency }: { price: number | null; currency: string }) {
+  if (price == null) return <span className="text-sm text-gray-400 dark:text-white/40">—</span>;
+  return (
+    <span className="text-base font-semibold text-gray-900 dark:text-white">
+      {price.toLocaleString()} <span className="text-xs font-normal text-gray-500 dark:text-white/50">{currency}</span>
+    </span>
+  );
+}
+
+function RetailerBadge({ slug }: { slug: string }) {
+  return (
+    <span className="inline-flex items-center rounded-full bg-gray-100 px-2 py-0.5 text-[11px] font-medium text-gray-600 dark:bg-white/10 dark:text-white/70">
+      {retailerLabel(slug)}
+    </span>
+  );
+}
+
+function TrackedProductCard({ product }: { product: Product }) {
+  return (
+    <a
+      href={product.url}
+      target="_blank"
+      rel="noreferrer"
+      className="group flex flex-col overflow-hidden rounded-xl border border-gray-200 bg-white p-3 transition hover:-translate-y-0.5 hover:shadow-md dark:border-white/10 dark:bg-white/[0.03]"
+    >
+      <ProductImage src={product.image_url} alt={product.title_en} />
+      <div className="mt-3 flex flex-1 flex-col gap-2">
+        <p className="line-clamp-2 min-h-[2.5rem] text-sm font-medium text-gray-900 group-hover:underline dark:text-white">
+          {product.title_en}
+        </p>
+        <div className="mt-auto flex items-center justify-between gap-2">
+          <PriceTag price={product.current_price} currency={product.currency} />
+          <span
+            className={`text-[11px] font-medium ${
+              product.in_stock ? "text-emerald-600 dark:text-emerald-400" : "text-red-500 dark:text-red-400"
+            }`}
+          >
+            {product.in_stock ? "In stock" : "Out of stock"}
+          </span>
+        </div>
+      </div>
+    </a>
+  );
+}
+
+function LiveResultCard({
   result,
   onFavorite,
   status,
@@ -40,27 +137,49 @@ function LiveResultRow({
   status: "idle" | "saving" | "saved" | "error";
 }) {
   return (
-    <li className="flex items-center justify-between gap-4 py-4">
-      <div className="min-w-0">
-        <a href={result.url} target="_blank" rel="noreferrer" className="font-medium hover:underline">
+    <div className="flex flex-col overflow-hidden rounded-xl border border-gray-200 bg-white p-3 transition hover:shadow-md dark:border-white/10 dark:bg-white/[0.03]">
+      <a href={result.url} target="_blank" rel="noreferrer" className="group">
+        <ProductImage src={result.imageUrl} alt={result.title} />
+        <p className="mt-3 line-clamp-2 min-h-[2.5rem] text-sm font-medium text-gray-900 group-hover:underline dark:text-white">
           {result.title}
-        </a>
-        <p className="text-sm text-gray-500">{result.retailerSlug}</p>
+        </p>
+      </a>
+      <div className="mt-2 flex items-center justify-between gap-2">
+        <RetailerBadge slug={result.retailerSlug} />
+        <PriceTag price={result.price} currency={result.currency} />
       </div>
-      <div className="flex shrink-0 items-center gap-3">
-        <span className="text-lg font-semibold">
-          {result.price} {result.currency}
-        </span>
-        <button
-          type="button"
-          onClick={onFavorite}
-          disabled={status === "saving" || status === "saved"}
-          className="rounded-md border border-gray-300 px-3 py-1.5 text-sm font-medium hover:bg-gray-50 disabled:opacity-50"
-        >
-          {status === "saved" ? "✓ Favorited / أُضيف" : status === "saving" ? "…" : "☆ Favorite / تفضيل"}
-        </button>
-      </div>
-    </li>
+      <button
+        type="button"
+        onClick={onFavorite}
+        disabled={status === "saving" || status === "saved"}
+        className={`mt-3 flex w-full items-center justify-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium transition disabled:cursor-default ${
+          status === "saved"
+            ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-400"
+            : status === "error"
+              ? "bg-red-50 text-red-600 dark:bg-red-500/10 dark:text-red-400"
+              : "bg-gray-900 text-white hover:bg-gray-700 dark:bg-white dark:text-gray-900 dark:hover:bg-white/85"
+        }`}
+      >
+        {status === "saved" ? (
+          <>✓ Favorited / أُضيف</>
+        ) : status === "saving" ? (
+          "…"
+        ) : status === "error" ? (
+          "Failed — retry / حاول مجدداً"
+        ) : (
+          <>☆ Favorite / تفضيل</>
+        )}
+      </button>
+    </div>
+  );
+}
+
+function SearchIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="h-4 w-4">
+      <circle cx="11" cy="11" r="7" />
+      <path d="m21 21-4.3-4.3" />
+    </svg>
   );
 }
 
@@ -70,9 +189,6 @@ function LiveResultRow({
 //    already tracked/favorited that matches -- a local DB lookup.
 // 2. Pressing Enter or the search button always runs POST /api/track live
 //    against the retailers themselves, regardless of what step 1 found.
-//    Earlier this only appeared when local search came up empty, which was
-//    confusing (a query that happened to match something local hid the
-//    live-search option entirely) -- it's unconditional now.
 // Live results are shown separately and are NOT saved automatically -- the
 // founder wants tracking to require a deliberate "favorite" action per
 // result (POST /api/favorite), not just showing up in a search.
@@ -164,62 +280,74 @@ export function ProductBrowser({ initialProducts }: { initialProducts: Product[]
         }}
         className="flex gap-2"
       >
-        <input
-          type="search"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          placeholder="Search products... / ابحث عن منتج..."
-          dir="auto"
-          className="w-full rounded-md border border-gray-300 px-4 py-2 text-sm focus:border-gray-500 focus:outline-none"
-        />
+        <div className="relative w-full">
+          <span className="pointer-events-none absolute inset-y-0 left-3 flex items-center text-gray-400 dark:text-white/40">
+            <SearchIcon />
+          </span>
+          <input
+            type="search"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search products... / ابحث عن منتج..."
+            dir="auto"
+            className="w-full rounded-xl border border-gray-200 bg-white py-2.5 pl-9 pr-4 text-sm text-gray-900 shadow-sm outline-none transition placeholder:text-gray-400 focus:border-gray-400 focus:ring-2 focus:ring-gray-900/10 dark:border-white/10 dark:bg-white/5 dark:text-white dark:placeholder:text-white/30 dark:focus:border-white/30"
+          />
+        </div>
         <button
           type="submit"
           disabled={!query.trim() || isTracking}
-          className="shrink-0 rounded-md bg-gray-900 px-4 py-2 text-sm font-medium text-white hover:bg-gray-700 disabled:opacity-50"
+          className="shrink-0 rounded-xl bg-gray-900 px-5 py-2.5 text-sm font-medium text-white shadow-sm transition hover:bg-gray-700 disabled:cursor-default disabled:opacity-40 dark:bg-white dark:text-gray-900 dark:hover:bg-white/85"
         >
           {isTracking ? "…" : "Search live / ابحث"}
         </button>
       </form>
 
-      {isSearching && <p className="mt-2 text-xs text-gray-400">Checking your list…</p>}
+      {isSearching && <p className="mt-2 text-xs text-gray-400 dark:text-white/30">Checking your list…</p>}
 
       {isTracking && (
-        <p className="mt-6 text-center text-sm text-gray-500">
+        <p className="mt-6 text-center text-sm text-gray-500 dark:text-white/50">
           Searching retailers live… (~30s) / جاري البحث الحي في المتاجر... (قد يأخذ ٣٠ ثانية)
         </p>
       )}
 
-      {trackError && <p className="mt-4 text-center text-sm text-red-600">{trackError}</p>}
+      {trackError && <p className="mt-4 text-center text-sm text-red-600 dark:text-red-400">{trackError}</p>}
 
       {!isTracking && liveResults.length === 0 && query.trim() && trackError === null && (
-        <p className="mt-2 text-xs text-gray-400">
+        <p className="mt-2 text-xs text-gray-400 dark:text-white/30">
           Press &quot;Search live&quot; to check retailers directly. / اضغط "ابحث" للبحث المباشر بالمتاجر.
         </p>
       )}
 
       {liveResults.length > 0 && (
-        <div className="mt-6">
-          <p className="text-xs uppercase tracking-wide text-gray-400">
-            Live results -- tap Favorite to track / نتائج حية -- اضغط تفضيل للمتابعة
+        <div className="mt-8">
+          <p className="text-xs font-medium uppercase tracking-wide text-gray-400 dark:text-white/30">
+            Live results — tap Favorite to track / نتائج حية — اضغط تفضيل للمتابعة
           </p>
-          <ul className="mt-2 divide-y divide-gray-200">
+          <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
             {liveResults.map((result) => (
-              <LiveResultRow
+              <LiveResultCard
                 key={`${result.retailerSlug}:${result.url}`}
                 result={result}
                 status={favoriteStatus[result.url] ?? "idle"}
                 onFavorite={() => favorite(result)}
               />
             ))}
-          </ul>
+          </div>
         </div>
       )}
 
-      <ul className="mt-6 divide-y divide-gray-200">
-        {products.map((product) => (
-          <ProductRow key={product.id} product={product} />
-        ))}
-      </ul>
+      <div className="mt-8">
+        {products.length > 0 && (
+          <p className="text-xs font-medium uppercase tracking-wide text-gray-400 dark:text-white/30">
+            Tracked / متابَع
+          </p>
+        )}
+        <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
+          {products.map((product) => (
+            <TrackedProductCard key={product.id} product={product} />
+          ))}
+        </div>
+      </div>
     </div>
   );
 }

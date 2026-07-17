@@ -14,6 +14,7 @@ interface FavoriteBody {
   title?: string;
   price?: number;
   currency?: string;
+  imageUrl?: string | null;
 }
 
 function deriveProductId(url: string): string {
@@ -22,7 +23,7 @@ function deriveProductId(url: string): string {
 
 export async function POST(request: Request): Promise<NextResponse> {
   const body = (await request.json().catch(() => null)) as FavoriteBody | null;
-  const { retailerSlug, url, title, price, currency } = body ?? {};
+  const { retailerSlug, url, title, price, currency, imageUrl } = body ?? {};
   if (!retailerSlug || !url || !title || typeof price !== "number" || !currency) {
     return NextResponse.json({ error: "retailerSlug, url, title, price, and currency are required" }, { status: 400 });
   }
@@ -55,6 +56,7 @@ export async function POST(request: Request): Promise<NextResponse> {
       retailer_product_id: retailerProductId,
       url,
       title_en: title,
+      image_url: imageUrl ?? null,
       current_price: price,
       currency,
       in_stock: true,

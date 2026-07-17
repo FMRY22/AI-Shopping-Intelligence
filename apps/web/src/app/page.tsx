@@ -22,14 +22,18 @@ export default async function HomePage() {
   const products = await getProducts();
 
   return (
-    <main className="mx-auto max-w-3xl p-6">
-      <h1 className="text-2xl font-semibold">Tracked Products</h1>
-      <p className="mt-1 text-sm text-gray-500">
-        Read-only proof that the collection pipeline (worker → database) is live.
-      </p>
+    <main className="min-h-screen bg-gray-50 dark:bg-[#0b0b0d]">
+      <div className="mx-auto max-w-5xl px-6 py-10">
+        <h1 className="text-2xl font-semibold tracking-tight text-gray-900 dark:text-white">
+          AI Shopping Intelligence
+        </h1>
+        <p className="mt-1 text-sm text-gray-500 dark:text-white/40">
+          Search retailers live, favorite what you want to track.
+        </p>
 
-      <div className="mt-6">
-        <ProductBrowser initialProducts={products} />
+        <div className="mt-8">
+          <ProductBrowser initialProducts={products} />
+        </div>
       </div>
     </main>
   );
