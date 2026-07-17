@@ -1,13 +1,11 @@
 name: diagnose-retailers
 
-# Throwaway diagnostic, not a product feature: the founder reports product
-# images aren't showing up in the deployed UI even though /api/track's
-# response includes valid-looking imageUrl values (confirmed 2026-07-17).
-# This checks two separate things a real browser would hit that this
-# sandbox's restricted network can't: (1) are the CDN image URLs actually
-# fetchable at all (status, content-type, any hotlink-protection block),
-# and (2) does the deployed page itself actually request them (or error
-# before ever trying). To be deleted once answered.
+# Throwaway diagnostic, not a product feature: checking whether Jarir and
+# Amazon product pages expose an og:image meta tag, which would let a
+# one-time backfill fill in image_url for products favorited before
+# 2026-07-17's fix (which stored null for all of them) without needing a
+# browser -- just a plain fetch + regex per product page. To be deleted
+# once answered.
 on:
   workflow_dispatch:
 
@@ -16,33 +14,16 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 3
     steps:
-      - name: Fetch a Jarir and an Amazon product image directly
+      - name: Check og:image on sample product pages
         run: |
           for pair in \
-            "jarir|https://ak-asset.jarir.com/akeneo-prod/asset/b/e/c/a/beca6ae2c5c94a52cc7f64f0ae4712e4177b3509_678954.jpg" \
-            "amazon|https://m.media-amazon.com/images/I/51MQ6U7wSrL._AC_UL320_.jpg"; do
+            "jarir|https://www.jarir.com/sa-en/apple-macbook-neo-laptops-678954.html" \
+            "amazon|https://www.amazon.sa/dp/B0GL948QH1"; do
             name="${pair%%|*}"
             url="${pair#*|}"
-            echo "=== $name: no referrer ==="
-            curl -sS -o /dev/null -D - "$url" \
+            echo "=== $name ==="
+            curl -sS "$url" \
               -A "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36" \
-              -H "Accept: image/avif,image/webp,image/*,*/*" \
-              -w "HTTP_STATUS:%{http_code} CONTENT_TYPE_HDR_ABOVE SIZE:%{size_download}\n" | head -20
-            echo "=== $name: with same-site referrer ==="
-            curl -sS -o /dev/null -D - "$url" \
-              -A "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36" \
-              -H "Accept: image/avif,image/webp,image/*,*/*" \
-              -e "https://ai-shopping-intelligence-seven.vercel.app/" \
-              -w "HTTP_STATUS:%{http_code} CONTENT_TYPE_HDR_ABOVE SIZE:%{size_download}\n" | head -20
+              -o page.html -w "HTTP_STATUS:%{http_code} SIZE:%{size_download}\n"
+            grep -oE '<meta[^>]*property="og:image"[^>]*>' page.html | head -2 || echo "no og:image found"
           done
-
-      - name: Fetch the deployed page HTML and check for image references
-        run: |
-          curl -sS "https://ai-shopping-intelligence-seven.vercel.app/" -o page.html \
-            -w "HTTP_STATUS:%{http_code}\n"
-          echo "--- image_url / backgroundImage occurrences in page HTML ---"
-          grep -o "backgroundImage[^,}]*" page.html | head -5 || true
-          grep -o "ak-asset.jarir.com[^\"']*" page.html | head -5 || true
-          grep -o "m.media-amazon.com[^\"']*" page.html | head -5 || true
-          echo "--- (a server-rendered products list, if any, embedded as JSON) ---"
-          grep -o "image_url[^,}]*" page.html | head -10 || true
