@@ -207,34 +207,36 @@ export async function POST(request: Request): Promise<NextResponse> {
   });
 
   try {
-    const results = await Promise.allSettled(
-      RETAILER_CONFIGS.map(async (config) => {
+    // Sequential, not Promise.allSettled -- 3 concurrent browser contexts
+    // (each rendering a full search-results page) was crashing the shared
+    // chromium process under Vercel's function memory limit, taking every
+    // retailer down with it ("Target page, context or browser has been
+    // closed" even for the ones that hadn't errored on their own, seen
+    // live 2026-07-17). One page open at a time trades some latency for
+    // not losing the whole request to an OOM kill.
+    const summary: { retailer: string; status: "fulfilled" | "rejected"; found: number; reason?: string }[] = [];
+    const liveResults: LiveSearchResult[] = [];
+    for (const config of RETAILER_CONFIGS) {
+      try {
         const found = await searchRetailer(browser, config, query);
-        const withPrice: LiveSearchResult[] = [];
+        let count = 0;
         for (const item of found) {
           const parsed = item.priceText ? parsePrice(item.priceText) : null;
           if (!parsed) continue;
-          withPrice.push({ retailerSlug: config.slug, url: item.url, title: item.title, price: parsed.amount, currency: parsed.currency });
+          liveResults.push({ retailerSlug: config.slug, url: item.url, title: item.title, price: parsed.amount, currency: parsed.currency });
+          count++;
         }
-        return withPrice;
-      }),
-    );
+        summary.push({ retailer: config.slug, status: "fulfilled", found: count });
+      } catch (err) {
+        summary.push({ retailer: config.slug, status: "rejected", found: 0, reason: err instanceof Error ? err.message : String(err) });
+      }
+    }
 
-    const liveResults = results.flatMap((r) => (r.status === "fulfilled" ? r.value : []));
-    const errors = results
-      .map((r, i) => (r.status === "rejected" ? `${RETAILER_CONFIGS[i]!.slug}: ${String(r.reason)}` : null))
-      .filter((e): e is string => e !== null);
+    const errors = summary
+      .filter((s) => s.status === "rejected")
+      .map((s) => `${s.retailer}: ${s.reason}`);
 
-    console.log(
-      "[track] summary",
-      query,
-      results.map((r, i) => ({
-        retailer: RETAILER_CONFIGS[i]!.slug,
-        status: r.status,
-        found: r.status === "fulfilled" ? r.value.length : 0,
-        reason: r.status === "rejected" ? String(r.reason) : undefined,
-      })),
-    );
+    console.log("[track] summary", query, summary);
 
     return NextResponse.json({ results: liveResults, ...(errors.length > 0 ? { partialErrors: errors } : {}) });
   } catch (err) {
