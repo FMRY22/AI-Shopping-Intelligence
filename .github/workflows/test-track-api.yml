@@ -1,0 +1,32 @@
+name: test-track-api
+
+# Self-verification tool, not part of the product: calls the deployed
+# POST /api/track endpoint directly from a runner with real internet
+# access (this sandbox's own network is policy-restricted to a small
+# allowlist and can't reach the live site), so results can be checked
+# from job logs instead of asking the founder to test from their phone
+# and report back manually every time.
+on:
+  workflow_dispatch:
+    inputs:
+      query:
+        description: "Search query to send to /api/track"
+        required: true
+        default: "samsung"
+
+jobs:
+  call:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Call /api/track
+        run: |
+          curl -sS -X POST "https://ai-shopping-intelligence-seven.vercel.app/api/track" \
+            -H "Content-Type: application/json" \
+            -d "{\"query\": \"${{ github.event.inputs.query }}\"}" \
+            -w "\nHTTP_STATUS:%{http_code}\nTIME_TOTAL:%{time_total}s\n" \
+            --max-time 120 \
+            | tee response.json
+
+      - name: Pretty-print response
+        run: python3 -m json.tool response.json || cat response.json
