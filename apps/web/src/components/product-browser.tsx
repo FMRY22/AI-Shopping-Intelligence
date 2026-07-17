@@ -64,23 +64,22 @@ function LiveResultRow({
   );
 }
 
-// Debounced client-side search against GET /api/search (API.md §3), which
-// calls the search_products Postgres function (0002_search_function.sql).
-// Kept as a small, self-contained client component -- the initial list
-// still renders server-side in page.tsx for a fast first paint; this only
-// takes over once the user actually types.
-//
-// GET /api/search only covers products already favorited/tracked. When it
-// comes up empty, POST /api/track (PRD.md FR-1/FR-18) is the fallback: a
-// live, on-demand search of the retailer itself. Live results are shown
-// separately and are NOT saved automatically -- the founder wants tracking
-// to require a deliberate "favorite" action per result (POST /api/favorite),
-// not just showing up in a search.
+// The search box does two independent things, both always available, never
+// one gating the other:
+// 1. As you type, GET /api/search (debounced) instantly shows anything
+//    already tracked/favorited that matches -- a local DB lookup.
+// 2. Pressing Enter or the search button always runs POST /api/track live
+//    against the retailers themselves, regardless of what step 1 found.
+//    Earlier this only appeared when local search came up empty, which was
+//    confusing (a query that happened to match something local hid the
+//    live-search option entirely) -- it's unconditional now.
+// Live results are shown separately and are NOT saved automatically -- the
+// founder wants tracking to require a deliberate "favorite" action per
+// result (POST /api/favorite), not just showing up in a search.
 export function ProductBrowser({ initialProducts }: { initialProducts: Product[] }) {
   const [query, setQuery] = useState("");
   const [products, setProducts] = useState(initialProducts);
   const [isSearching, setIsSearching] = useState(false);
-  const [hasSearchedLocally, setHasSearchedLocally] = useState(false);
   const [isTracking, setIsTracking] = useState(false);
   const [trackError, setTrackError] = useState<string | null>(null);
   const [liveResults, setLiveResults] = useState<LiveResult[]>([]);
@@ -88,12 +87,9 @@ export function ProductBrowser({ initialProducts }: { initialProducts: Product[]
 
   useEffect(() => {
     const trimmed = query.trim();
-    setTrackError(null);
-    setLiveResults([]);
     if (!trimmed) {
       setProducts(initialProducts);
       setIsSearching(false);
-      setHasSearchedLocally(false);
       return;
     }
 
@@ -102,10 +98,7 @@ export function ProductBrowser({ initialProducts }: { initialProducts: Product[]
     const timeout = setTimeout(() => {
       fetch(`/api/search?q=${encodeURIComponent(trimmed)}`, { signal: controller.signal })
         .then((res) => res.json() as Promise<{ products?: Product[]; error?: string }>)
-        .then((data) => {
-          setProducts(data.products ?? []);
-          setHasSearchedLocally(true);
-        })
+        .then((data) => setProducts(data.products ?? []))
         .catch((err: unknown) => {
           if (err instanceof Error && err.name !== "AbortError") console.error(err);
         })
@@ -119,11 +112,12 @@ export function ProductBrowser({ initialProducts }: { initialProducts: Product[]
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [query]);
 
-  function searchNow() {
+  function searchLive() {
     const trimmed = query.trim();
-    if (!trimmed) return;
+    if (!trimmed || isTracking) return;
     setIsTracking(true);
     setTrackError(null);
+    setLiveResults([]);
     setFavoriteStatus({});
     fetch("/api/track", {
       method: "POST",
@@ -161,44 +155,47 @@ export function ProductBrowser({ initialProducts }: { initialProducts: Product[]
       .catch(() => setFavoriteStatus((prev) => ({ ...prev, [result.url]: "error" })));
   }
 
-  const showSearchNow = hasSearchedLocally && !isSearching && products.length === 0 && liveResults.length === 0 && query.trim();
-
   return (
     <div>
-      <input
-        type="search"
-        value={query}
-        onChange={(e) => setQuery(e.target.value)}
-        placeholder="Search products... / ابحث عن منتج..."
-        dir="auto"
-        className="w-full rounded-md border border-gray-300 px-4 py-2 text-sm focus:border-gray-500 focus:outline-none"
-      />
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          searchLive();
+        }}
+        className="flex gap-2"
+      >
+        <input
+          type="search"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Search products... / ابحث عن منتج..."
+          dir="auto"
+          className="w-full rounded-md border border-gray-300 px-4 py-2 text-sm focus:border-gray-500 focus:outline-none"
+        />
+        <button
+          type="submit"
+          disabled={!query.trim() || isTracking}
+          className="shrink-0 rounded-md bg-gray-900 px-4 py-2 text-sm font-medium text-white hover:bg-gray-700 disabled:opacity-50"
+        >
+          {isTracking ? "…" : "Search live / ابحث"}
+        </button>
+      </form>
 
-      {isSearching && <p className="mt-2 text-xs text-gray-400">Searching…</p>}
-
-      {showSearchNow && !isTracking && (
-        <div className="mt-6 text-center">
-          <p className="text-sm text-gray-500">
-            No products match &quot;{query}&quot; yet. / ما لقينا شي محلياً.
-          </p>
-          <button
-            type="button"
-            onClick={searchNow}
-            className="mt-3 rounded-md bg-gray-900 px-4 py-2 text-sm font-medium text-white hover:bg-gray-700"
-          >
-            Search retailers now / ابحث الآن في المتاجر
-          </button>
-          <p className="mt-2 text-xs text-gray-400">Can take up to ~30 seconds / قد يأخذ حتى ٣٠ ثانية</p>
-        </div>
-      )}
+      {isSearching && <p className="mt-2 text-xs text-gray-400">Checking your list…</p>}
 
       {isTracking && (
         <p className="mt-6 text-center text-sm text-gray-500">
-          Searching retailers live… / جاري البحث الحي في المتاجر...
+          Searching retailers live… (~30s) / جاري البحث الحي في المتاجر... (قد يأخذ ٣٠ ثانية)
         </p>
       )}
 
       {trackError && <p className="mt-4 text-center text-sm text-red-600">{trackError}</p>}
+
+      {!isTracking && liveResults.length === 0 && query.trim() && trackError === null && (
+        <p className="mt-2 text-xs text-gray-400">
+          Press &quot;Search live&quot; to check retailers directly. / اضغط "ابحث" للبحث المباشر بالمتاجر.
+        </p>
+      )}
 
       {liveResults.length > 0 && (
         <div className="mt-6">
