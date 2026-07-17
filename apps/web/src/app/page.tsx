@@ -23,17 +23,8 @@ export default async function HomePage() {
 
   return (
     <main className="min-h-screen bg-gray-50 dark:bg-[#0b0b0d]">
-      <div className="mx-auto max-w-5xl px-6 py-10">
-        <h1 className="text-2xl font-semibold tracking-tight text-gray-900 dark:text-white">
-          AI Shopping Intelligence
-        </h1>
-        <p className="mt-1 text-sm text-gray-500 dark:text-white/40">
-          Search retailers live, favorite what you want to track.
-        </p>
-
-        <div className="mt-8">
-          <ProductBrowser initialProducts={products} />
-        </div>
+      <div className="mx-auto max-w-5xl px-6 py-8">
+        <ProductBrowser initialProducts={products} />
       </div>
     </main>
   );

@@ -157,7 +157,7 @@ function LiveResultCard({
             ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-400"
             : status === "error"
               ? "bg-red-50 text-red-600 dark:bg-red-500/10 dark:text-red-400"
-              : "bg-gray-900 text-white hover:bg-gray-700 dark:bg-white dark:text-gray-900 dark:hover:bg-white/85"
+              : "bg-indigo-600 text-white hover:bg-indigo-500 dark:bg-indigo-500 dark:hover:bg-indigo-400"
         }`}
       >
         {status === "saved" ? (
@@ -171,6 +171,15 @@ function LiveResultCard({
         )}
       </button>
     </div>
+  );
+}
+
+function SectionLabel({ children }: { children: React.ReactNode }) {
+  return (
+    <p className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-gray-400 dark:text-white/30">
+      <span className="h-1.5 w-1.5 rounded-full bg-indigo-500" />
+      {children}
+    </p>
   );
 }
 
@@ -273,6 +282,10 @@ export function ProductBrowser({ initialProducts }: { initialProducts: Product[]
 
   return (
     <div>
+      <p className="mb-4 text-sm text-gray-500 dark:text-white/40">
+        Search retailers live, favorite what you want to track. / ابحث في المتاجر مباشرة، وتابع اللي يعجبك.
+      </p>
+
       <form
         onSubmit={(e) => {
           e.preventDefault();
@@ -290,13 +303,13 @@ export function ProductBrowser({ initialProducts }: { initialProducts: Product[]
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Search products... / ابحث عن منتج..."
             dir="auto"
-            className="w-full rounded-xl border border-gray-200 bg-white py-2.5 pl-9 pr-4 text-sm text-gray-900 shadow-sm outline-none transition placeholder:text-gray-400 focus:border-gray-400 focus:ring-2 focus:ring-gray-900/10 dark:border-white/10 dark:bg-white/5 dark:text-white dark:placeholder:text-white/30 dark:focus:border-white/30"
+            className="w-full rounded-xl border border-gray-200 bg-white py-2.5 pl-9 pr-4 text-sm text-gray-900 shadow-sm outline-none transition placeholder:text-gray-400 focus:border-indigo-400 focus:ring-2 focus:ring-indigo-500/15 dark:border-white/10 dark:bg-white/5 dark:text-white dark:placeholder:text-white/30 dark:focus:border-indigo-400"
           />
         </div>
         <button
           type="submit"
           disabled={!query.trim() || isTracking}
-          className="shrink-0 rounded-xl bg-gray-900 px-5 py-2.5 text-sm font-medium text-white shadow-sm transition hover:bg-gray-700 disabled:cursor-default disabled:opacity-40 dark:bg-white dark:text-gray-900 dark:hover:bg-white/85"
+          className="shrink-0 rounded-xl bg-indigo-600 px-5 py-2.5 text-sm font-medium text-white shadow-sm transition hover:bg-indigo-500 disabled:cursor-default disabled:opacity-40 dark:bg-indigo-500 dark:hover:bg-indigo-400"
         >
           {isTracking ? "…" : "Search live / ابحث"}
         </button>
@@ -320,9 +333,7 @@ export function ProductBrowser({ initialProducts }: { initialProducts: Product[]
 
       {liveResults.length > 0 && (
         <div className="mt-8">
-          <p className="text-xs font-medium uppercase tracking-wide text-gray-400 dark:text-white/30">
-            Live results — tap Favorite to track / نتائج حية — اضغط تفضيل للمتابعة
-          </p>
+          <SectionLabel>Live results — tap Favorite to track / نتائج حية — اضغط تفضيل للمتابعة</SectionLabel>
           <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
             {liveResults.map((result) => (
               <LiveResultCard
@@ -337,11 +348,7 @@ export function ProductBrowser({ initialProducts }: { initialProducts: Product[]
       )}
 
       <div className="mt-8">
-        {products.length > 0 && (
-          <p className="text-xs font-medium uppercase tracking-wide text-gray-400 dark:text-white/30">
-            Tracked / متابَع
-          </p>
-        )}
+        {products.length > 0 && <SectionLabel>Tracked / متابَع</SectionLabel>}
         <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
           {products.map((product) => (
             <TrackedProductCard key={product.id} product={product} />
