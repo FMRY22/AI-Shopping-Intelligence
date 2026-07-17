@@ -127,19 +127,26 @@ async function launchBrowser(): Promise<Browser> {
   });
 }
 
-async function searchRetailer(config: RetailerSearchConfig, query: string): Promise<FoundItem[]> {
-  // A fresh browser per retailer, not one shared across all three: the
-  // shared-browser version reliably died after amazon_sa's heavy SPA page
-  // (Vercel's memory-constrained --single-process chromium), and every
-  // retailer searched after that point failed immediately with
-  // "Target page, context or browser has been closed" even before doing
-  // any work of its own (seen live 2026-07-17, both concurrent and
-  // sequential). @sparticuz/chromium-min's pack is already cached in /tmp
-  // after the first launch, so relaunching per retailer is cheap.
-  const browser = await launchBrowser();
+const BLOCKED_RESOURCE_TYPES = new Set(["image", "media", "font", "stylesheet"]);
+
+async function searchRetailer(browser: Browser, config: RetailerSearchConfig, query: string): Promise<FoundItem[]> {
   const context = await browser.newContext({
     viewport: { width: 1366, height: 900 },
     extraHTTPHeaders: { "Accept-Language": "en-US,en;q=0.9" },
+  });
+  // Blocking images/fonts/CSS/media cuts a heavy SPA search-results page
+  // (amazon.sa in particular) down to roughly its HTML+JS weight. This is
+  // what actually fixed reliability -- launching a fresh browser per
+  // retailer avoided one crash mode (the shared process dying under memory
+  // pressure after amazon_sa's page, confirmed live 2026-07-17) but made
+  // the 3-retailer request as a whole exceed Vercel's 60s maxDuration
+  // (confirmed via a dedicated GitHub Actions test call: HTTP 504
+  // FUNCTION_INVOCATION_TIMEOUT at exactly 61s). Lowering memory pressure
+  // at the source lets one browser be reused safely again.
+  await context.route("**/*", (route) => {
+    const type = route.request().resourceType();
+    if (BLOCKED_RESOURCE_TYPES.has(type)) return route.abort();
+    return route.continue();
   });
   const page = await context.newPage();
   try {
@@ -206,7 +213,7 @@ async function searchRetailer(config: RetailerSearchConfig, query: string): Prom
 
     return items;
   } finally {
-    await browser.close();
+    await context.close();
   }
 }
 
@@ -217,29 +224,35 @@ export async function POST(request: Request): Promise<NextResponse> {
     return NextResponse.json({ error: "query is required" }, { status: 400 });
   }
 
-  // Sequential, each with its own browser (see searchRetailer's comment) --
-  // one retailer's search finishing doesn't risk taking the next one down.
-  const summary: { retailer: string; status: "fulfilled" | "rejected"; found: number; reason?: string }[] = [];
-  const liveResults: LiveSearchResult[] = [];
-  for (const config of RETAILER_CONFIGS) {
-    try {
-      const found = await searchRetailer(config, query);
-      let count = 0;
-      for (const item of found) {
-        const parsed = item.priceText ? parsePrice(item.priceText) : null;
-        if (!parsed) continue;
-        liveResults.push({ retailerSlug: config.slug, url: item.url, title: item.title, price: parsed.amount, currency: parsed.currency });
-        count++;
+  const browser = await launchBrowser();
+  try {
+    // Sequential, one browser shared across retailers, each with its own
+    // context (see searchRetailer's comment on why -- and why concurrent
+    // contexts aren't used either, that's what led to this design).
+    const summary: { retailer: string; status: "fulfilled" | "rejected"; found: number; reason?: string }[] = [];
+    const liveResults: LiveSearchResult[] = [];
+    for (const config of RETAILER_CONFIGS) {
+      try {
+        const found = await searchRetailer(browser, config, query);
+        let count = 0;
+        for (const item of found) {
+          const parsed = item.priceText ? parsePrice(item.priceText) : null;
+          if (!parsed) continue;
+          liveResults.push({ retailerSlug: config.slug, url: item.url, title: item.title, price: parsed.amount, currency: parsed.currency });
+          count++;
+        }
+        summary.push({ retailer: config.slug, status: "fulfilled", found: count });
+      } catch (err) {
+        summary.push({ retailer: config.slug, status: "rejected", found: 0, reason: err instanceof Error ? err.message : String(err) });
       }
-      summary.push({ retailer: config.slug, status: "fulfilled", found: count });
-    } catch (err) {
-      summary.push({ retailer: config.slug, status: "rejected", found: 0, reason: err instanceof Error ? err.message : String(err) });
     }
+
+    const errors = summary.filter((s) => s.status === "rejected").map((s) => `${s.retailer}: ${s.reason}`);
+
+    console.log("[track] summary", query, summary);
+
+    return NextResponse.json({ results: liveResults, ...(errors.length > 0 ? { partialErrors: errors } : {}) });
+  } finally {
+    await browser.close();
   }
-
-  const errors = summary.filter((s) => s.status === "rejected").map((s) => `${s.retailer}: ${s.reason}`);
-
-  console.log("[track] summary", query, summary);
-
-  return NextResponse.json({ results: liveResults, ...(errors.length > 0 ? { partialErrors: errors } : {}) });
 }
