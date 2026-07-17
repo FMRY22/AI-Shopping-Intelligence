@@ -207,6 +207,7 @@ async function saveFoundItems(
         in_stock: true,
         last_checked_at: new Date().toISOString(),
         next_due_at: new Date().toISOString(),
+        source: "user_search",
       })
       .select()
       .single();

@@ -23,12 +23,17 @@ export interface RetailerWorkerConfig {
   discoverUrls?: DiscoverUrlsFn;
   /** Caps how many newly-discovered products get inserted in a single run, bounding runtime against the 10-minute workflow timeout. */
   maxNewDiscoveries?: number;
+  /** Caps how many catalog_crawl-sourced products exist at once for this retailer -- older ones are deleted as new ones arrive. Never touches 'seed' or 'user_search' rows. */
+  maxCatalogCrawlProducts?: number;
   batchLimit?: number;
 }
 
-type WorkItem = { kind: "recheck"; product: Product } | { kind: "discover"; url: string };
+type WorkItem =
+  | { kind: "recheck"; product: Product }
+  | { kind: "discover"; url: string; source: "seed" | "catalog_crawl" };
 
 const DEFAULT_MAX_NEW_DISCOVERIES = 8;
+const DEFAULT_MAX_CATALOG_CRAWL_PRODUCTS = 10;
 
 export async function runRetailerWorker(config: RetailerWorkerConfig): Promise<void> {
   const {
@@ -38,6 +43,7 @@ export async function runRetailerWorker(config: RetailerWorkerConfig): Promise<v
     scrapeProductPage,
     discoverUrls,
     maxNewDiscoveries = DEFAULT_MAX_NEW_DISCOVERIES,
+    maxCatalogCrawlProducts = DEFAULT_MAX_CATALOG_CRAWL_PRODUCTS,
     batchLimit = 25,
   } = config;
   const startedAt = new Date().toISOString();
@@ -109,8 +115,8 @@ export async function runRetailerWorker(config: RetailerWorkerConfig): Promise<v
 
     const workItems: WorkItem[] = [
       ...(dueProducts ?? []).map((product): WorkItem => ({ kind: "recheck", product })),
-      ...newSeedUrls.map((url): WorkItem => ({ kind: "discover", url })),
-      ...newDiscoveredUrls.map((url): WorkItem => ({ kind: "discover", url })),
+      ...newSeedUrls.map((url): WorkItem => ({ kind: "discover", url, source: "seed" })),
+      ...newDiscoveredUrls.map((url): WorkItem => ({ kind: "discover", url, source: "catalog_crawl" })),
     ];
 
     log("info", "worker starting", {
@@ -134,7 +140,7 @@ export async function runRetailerWorker(config: RetailerWorkerConfig): Promise<v
           if (item.kind === "recheck") {
             await handleRecheck(db, page, item.product, scrapeProductPage);
           } else {
-            await handleDiscover(db, page, retailer.id, item.url, scrapeProductPage);
+            await handleDiscover(db, page, retailer.id, item.url, item.source, scrapeProductPage);
           }
         } finally {
           await page.close();
@@ -142,6 +148,10 @@ export async function runRetailerWorker(config: RetailerWorkerConfig): Promise<v
       },
       (item) => (item.kind === "recheck" ? item.product.url : item.url),
     );
+
+    if (discoverUrls) {
+      await pruneCatalogCrawlProducts(db, retailer.id, maxCatalogCrawlProducts, workerName);
+    }
 
     await writeRunSummary(db, workerName, retailer.id, startedAt, result);
     log("info", "worker finished", { worker: workerName, ...result });
@@ -202,6 +212,7 @@ async function handleDiscover(
   page: Page,
   retailerId: string,
   url: string,
+  source: "seed" | "catalog_crawl",
   scrapeProductPage: ScrapeProductPageFn,
 ): Promise<void> {
   const scraped = await withSingleRetry(() => scrapeProductPage(page, url));
@@ -222,6 +233,7 @@ async function handleDiscover(
       in_stock: scraped.inStock,
       last_checked_at: new Date().toISOString(),
       next_due_at: new Date(Date.now() + intervalToMs("24 hours")).toISOString(),
+      source,
     })
     .select()
     .single();
@@ -234,6 +246,41 @@ async function handleDiscover(
     in_stock: scraped.inStock,
   });
   if (priceError) throw new Error(`initial price_history insert failed: ${priceError.message}`);
+}
+
+/**
+ * Keeps only the newest `maxCount` catalog_crawl-sourced products for a
+ * retailer -- 'seed' and 'user_search' rows are never touched, no matter
+ * how old, since those are things someone deliberately asked to track
+ * (WORKERS.md's per-item isolation rule applies here too: a pruning
+ * failure is logged and swallowed, never allowed to fail the whole run).
+ */
+async function pruneCatalogCrawlProducts(
+  db: TypedSupabaseClient,
+  retailerId: string,
+  maxCount: number,
+  workerName: string,
+): Promise<void> {
+  const { data: crawlProducts, error } = await db
+    .from("products")
+    .select("id")
+    .eq("retailer_id", retailerId)
+    .eq("source", "catalog_crawl")
+    .order("created_at", { ascending: false });
+  if (error) {
+    log("warn", "catalog_crawl prune: could not list products", { worker: workerName, error: error.message });
+    return;
+  }
+
+  const toDelete = (crawlProducts ?? []).slice(maxCount).map((p) => p.id);
+  if (toDelete.length === 0) return;
+
+  const { error: deleteError } = await db.from("products").delete().in("id", toDelete);
+  if (deleteError) {
+    log("warn", "catalog_crawl prune: delete failed", { worker: workerName, error: deleteError.message });
+    return;
+  }
+  log("info", "catalog_crawl prune: removed rotated-out products", { worker: workerName, deleted: toDelete.length });
 }
 
 async function writeRunSummary(

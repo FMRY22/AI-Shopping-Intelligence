@@ -57,6 +57,8 @@ type ProductsRow = {
   is_active: boolean;
   created_at: string;
   updated_at: string;
+  /** How this row entered the catalog -- see 0003_product_source.sql's header comment. */
+  source: "seed" | "catalog_crawl" | "user_search";
 };
 
 type PriceHistoryRow = {
