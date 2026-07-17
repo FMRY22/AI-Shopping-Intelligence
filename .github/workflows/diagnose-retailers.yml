@@ -1,0 +1,102 @@
+name: diagnose-retailers
+
+# Throwaway diagnostic, not a product feature. Two separate investigations:
+# 1. Jarir: static HTML probing proved .product-tile is a generic "trending
+#    now" widget, identical across totally different queries -- real
+#    per-query results must come from a client-side API call. This uses a
+#    real headless browser (not curl) to capture network requests during
+#    an actual search, to find that endpoint.
+# 2. extra: Cloudflare specifically challenges our headless browser (plain
+#    curl to the same URL is not challenged). Testing whether basic,
+#    legitimate anti-fingerprinting adjustments (hiding navigator.webdriver,
+#    realistic headers) are enough -- not pursuing elaborate evasion beyond
+#    this.
+# To be deleted once answered.
+on:
+  workflow_dispatch:
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install playwright
+        run: |
+          npm init -y >/dev/null
+          npm install playwright@1.49 >/dev/null
+          npx playwright install --with-deps chromium
+
+      - name: Capture Jarir search network traffic
+        run: |
+          cat > jarir-probe.mjs <<'EOF'
+          import { chromium } from "playwright";
+
+          const browser = await chromium.launch();
+          const page = await browser.newPage();
+          const apiCalls = [];
+
+          page.on("request", (req) => {
+            const url = req.url();
+            if (/api|search|graphql|algolia|query/i.test(url) && !/\.(js|css|png|jpg|svg|woff)/i.test(url)) {
+              apiCalls.push({ method: req.method(), url });
+            }
+          });
+
+          await page.goto("https://www.jarir.com/sa-en/catalogsearch/result/?q=laptop", {
+            waitUntil: "networkidle",
+            timeout: 30000,
+          }).catch((e) => console.log("goto error:", e.message));
+
+          await page.waitForTimeout(3000);
+
+          console.log("--- captured request URLs (api/search/graphql-ish) ---");
+          for (const c of apiCalls) console.log(c.method, c.url);
+
+          console.log("--- visible product titles after JS render ---");
+          const titles = await page.locator(".product-title__title").allTextContents().catch(() => []);
+          for (const t of titles.slice(0, 8)) console.log(" -", t.replace(/\s+/g, " ").trim());
+
+          await browser.close();
+          EOF
+          node jarir-probe.mjs
+
+      - name: Test extra.com with basic anti-fingerprinting
+        run: |
+          cat > extra-probe.mjs <<'EOF'
+          import { chromium } from "playwright";
+
+          const browser = await chromium.launch({
+            args: ["--disable-blink-features=AutomationControlled"],
+          });
+          const context = await browser.newContext({
+            userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            viewport: { width: 1366, height: 900 },
+            locale: "en-US",
+            extraHTTPHeaders: { "Accept-Language": "en-US,en;q=0.9" },
+          });
+          await context.addInitScript(() => {
+            Object.defineProperty(navigator, "webdriver", { get: () => undefined });
+          });
+          const page = await context.newPage();
+
+          await page.goto("https://www.extra.com/en-sa/search/?q=laptop", {
+            waitUntil: "domcontentloaded",
+            timeout: 30000,
+          }).catch((e) => console.log("goto error:", e.message));
+
+          await page.waitForTimeout(2000);
+          console.log("--- title ---");
+          console.log(await page.title().catch(() => "<failed>"));
+          console.log("--- final url ---");
+          console.log(page.url());
+          console.log("--- body text sample (first 300 chars) ---");
+          const bodyText = await page.locator("body").innerText().catch(() => "");
+          console.log(bodyText.slice(0, 300));
+
+          await browser.close();
+          EOF
+          node extra-probe.mjs
