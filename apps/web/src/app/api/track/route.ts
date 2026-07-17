@@ -67,7 +67,11 @@ const RETAILER_CONFIGS: RetailerSearchConfig[] = [
     cardSelectors: ["div[data-component-type='s-search-result']"],
     idAttribute: { name: "data-asin", toUrl: (asin) => `https://www.amazon.sa/dp/${asin}` },
     linkSelectors: ["h2 a"],
-    titleSelectors: ["h2 a span", "h2 span", "h2"],
+    // "h2 a" (the whole anchor's text) first -- not "h2 a span", which
+    // grabs only the first of several inner spans (often just a leading
+    // brand-name fragment like "Samsung" instead of the full title, seen
+    // live 2026-07-17). "h2" alone is the final fallback.
+    titleSelectors: ["h2 a", "h2"],
     priceSelectors: [".a-price .a-offscreen", ".a-price"],
   },
   {
