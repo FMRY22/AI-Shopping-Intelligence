@@ -42,6 +42,11 @@ interface RetailerSearchConfig {
   slug: string;
   searchUrl: (q: string) => string;
   cardSelectors: string[];
+  // Amazon's search cards carry a reliable data-asin attribute -- read that
+  // directly rather than an href, since the confirmed-working single-retailer
+  // version used it and a generic "h2 a" href selector turned out not to
+  // match (48 cards found, 0 extracted -- see [track] runtime logs, 2026-07-17).
+  idAttribute?: { name: string; toUrl: (id: string) => string };
   linkSelectors: string[];
   titleSelectors: string[];
   priceSelectors: string[];
@@ -52,6 +57,7 @@ const RETAILER_CONFIGS: RetailerSearchConfig[] = [
     slug: "amazon_sa",
     searchUrl: (q) => `https://www.amazon.sa/s?k=${encodeURIComponent(q)}`,
     cardSelectors: ["div[data-component-type='s-search-result']"],
+    idAttribute: { name: "data-asin", toUrl: (asin) => `https://www.amazon.sa/dp/${asin}` },
     linkSelectors: ["h2 a"],
     titleSelectors: ["h2 a span", "h2 span", "h2"],
     priceSelectors: [".a-price .a-offscreen", ".a-price"],
@@ -124,7 +130,13 @@ async function searchRetailer(browser: Browser, config: RetailerSearchConfig, qu
     const items: FoundItem[] = [];
     for (let i = 0; i < Math.min(count, MAX_RESULTS_PER_RETAILER); i++) {
       const card = cards.nth(i);
-      const url = await urlFromFirstMatchIn(card, page, config.linkSelectors);
+
+      let url: string | null = null;
+      if (config.idAttribute) {
+        const id = await card.getAttribute(config.idAttribute.name, { timeout: FIELD_TIMEOUT_MS }).catch(() => null);
+        if (id) url = config.idAttribute.toUrl(id);
+      }
+      if (!url) url = await urlFromFirstMatchIn(card, page, config.linkSelectors);
       if (!url) continue;
 
       const title = await textFromFirstMatchIn(card, config.titleSelectors);
