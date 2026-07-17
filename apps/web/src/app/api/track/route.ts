@@ -12,10 +12,15 @@ import { parsePrice } from "@repo/shared";
 // gets tracked just because it showed up in a search; the founder wants
 // that to require a deliberate action, so saving is POST /api/favorite's
 // job, triggered per-result from the UI. Confirmed working end-to-end for
-// Amazon (2026-07-17); Jarir/extra search-results-page selectors below are
-// first-guess, unverified against the live sites -- same situation their
-// product-page selectors started in (see workers/jarir and workers/extra's
-// selectors.ts header comments), expect a live debugging round.
+// Amazon and Jarir (2026-07-17, verified via a curl probe of the live
+// search HTML -- see jarir's cardSelectors comment below). extra is a
+// known gap: Cloudflare's bot-detection serves our headless browser a
+// challenge page ("Attention Required") on the search URL, even though a
+// plain curl request to the same URL is not challenged -- it's specifically
+// fingerprinting the automated browser, not blocking the IP/route in
+// general. Not worth chasing with stealth/fingerprint-spoofing techniques;
+// extra fails gracefully (0 results, logged, no crash) until/unless that
+// changes.
 export const runtime = "nodejs";
 export const maxDuration = 60;
 
@@ -81,10 +86,14 @@ const RETAILER_CONFIGS: RetailerSearchConfig[] = [
   {
     slug: "jarir",
     searchUrl: (q) => `https://www.jarir.com/sa-en/catalogsearch/result/?q=${encodeURIComponent(q)}`,
-    cardSelectors: ["li.product-item", ".product-item", "[class*='product-item']"],
-    linkSelectors: ["a.product-item-link", "h2 a", "a[href]"],
-    titleSelectors: ["a.product-item-link", "h2", "[class*='product-name']"],
-    priceSelectors: ['[itemprop="price"]', ".price-box .price", '[class*="price"]'],
+    // Confirmed against real server-rendered HTML (2026-07-17, curl probe of
+    // the live search page) -- "product-item" (the prior guess, borrowed
+    // from a typical Magento theme) doesn't exist on this page at all;
+    // Jarir's actual grid uses a "product-tile" BEM-style naming scheme.
+    cardSelectors: [".product-tile", "[class*='product-tile']"],
+    linkSelectors: [".product-tile__link", "a[href]"],
+    titleSelectors: [".product-title", "[class*='product-title']"],
+    priceSelectors: [".product-tile__price", '[class*="price"]'],
   },
   {
     slug: "extra",
