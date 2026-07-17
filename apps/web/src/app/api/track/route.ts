@@ -119,7 +119,24 @@ async function urlFromFirstMatchIn(scope: Locator, page: Page, selectors: string
   return null;
 }
 
-async function searchRetailer(browser: Browser, config: RetailerSearchConfig, query: string): Promise<FoundItem[]> {
+async function launchBrowser(): Promise<Browser> {
+  return playwright.launch({
+    args: chromium.args,
+    executablePath: await chromium.executablePath(CHROMIUM_PACK_URL),
+    headless: true,
+  });
+}
+
+async function searchRetailer(config: RetailerSearchConfig, query: string): Promise<FoundItem[]> {
+  // A fresh browser per retailer, not one shared across all three: the
+  // shared-browser version reliably died after amazon_sa's heavy SPA page
+  // (Vercel's memory-constrained --single-process chromium), and every
+  // retailer searched after that point failed immediately with
+  // "Target page, context or browser has been closed" even before doing
+  // any work of its own (seen live 2026-07-17, both concurrent and
+  // sequential). @sparticuz/chromium-min's pack is already cached in /tmp
+  // after the first launch, so relaunching per retailer is cheap.
+  const browser = await launchBrowser();
   const context = await browser.newContext({
     viewport: { width: 1366, height: 900 },
     extraHTTPHeaders: { "Accept-Language": "en-US,en;q=0.9" },
@@ -189,7 +206,7 @@ async function searchRetailer(browser: Browser, config: RetailerSearchConfig, qu
 
     return items;
   } finally {
-    await context.close();
+    await browser.close();
   }
 }
 
@@ -200,51 +217,29 @@ export async function POST(request: Request): Promise<NextResponse> {
     return NextResponse.json({ error: "query is required" }, { status: 400 });
   }
 
-  const browser = await playwright.launch({
-    args: chromium.args,
-    executablePath: await chromium.executablePath(CHROMIUM_PACK_URL),
-    headless: true,
-  });
-
-  try {
-    // Sequential, not Promise.allSettled -- 3 concurrent browser contexts
-    // (each rendering a full search-results page) was crashing the shared
-    // chromium process under Vercel's function memory limit, taking every
-    // retailer down with it ("Target page, context or browser has been
-    // closed" even for the ones that hadn't errored on their own, seen
-    // live 2026-07-17). One page open at a time trades some latency for
-    // not losing the whole request to an OOM kill.
-    const summary: { retailer: string; status: "fulfilled" | "rejected"; found: number; reason?: string }[] = [];
-    const liveResults: LiveSearchResult[] = [];
-    for (const config of RETAILER_CONFIGS) {
-      try {
-        const found = await searchRetailer(browser, config, query);
-        let count = 0;
-        for (const item of found) {
-          const parsed = item.priceText ? parsePrice(item.priceText) : null;
-          if (!parsed) continue;
-          liveResults.push({ retailerSlug: config.slug, url: item.url, title: item.title, price: parsed.amount, currency: parsed.currency });
-          count++;
-        }
-        summary.push({ retailer: config.slug, status: "fulfilled", found: count });
-      } catch (err) {
-        summary.push({ retailer: config.slug, status: "rejected", found: 0, reason: err instanceof Error ? err.message : String(err) });
+  // Sequential, each with its own browser (see searchRetailer's comment) --
+  // one retailer's search finishing doesn't risk taking the next one down.
+  const summary: { retailer: string; status: "fulfilled" | "rejected"; found: number; reason?: string }[] = [];
+  const liveResults: LiveSearchResult[] = [];
+  for (const config of RETAILER_CONFIGS) {
+    try {
+      const found = await searchRetailer(config, query);
+      let count = 0;
+      for (const item of found) {
+        const parsed = item.priceText ? parsePrice(item.priceText) : null;
+        if (!parsed) continue;
+        liveResults.push({ retailerSlug: config.slug, url: item.url, title: item.title, price: parsed.amount, currency: parsed.currency });
+        count++;
       }
+      summary.push({ retailer: config.slug, status: "fulfilled", found: count });
+    } catch (err) {
+      summary.push({ retailer: config.slug, status: "rejected", found: 0, reason: err instanceof Error ? err.message : String(err) });
     }
-
-    const errors = summary
-      .filter((s) => s.status === "rejected")
-      .map((s) => `${s.retailer}: ${s.reason}`);
-
-    console.log("[track] summary", query, summary);
-
-    return NextResponse.json({ results: liveResults, ...(errors.length > 0 ? { partialErrors: errors } : {}) });
-  } catch (err) {
-    return NextResponse.json(
-      { error: `live search failed: ${err instanceof Error ? err.message : String(err)}` },
-      { status: 502 },
-    );
-  } finally {
-    await browser.close();
   }
+
+  const errors = summary.filter((s) => s.status === "rejected").map((s) => `${s.retailer}: ${s.reason}`);
+
+  console.log("[track] summary", query, summary);
+
+  return NextResponse.json({ results: liveResults, ...(errors.length > 0 ? { partialErrors: errors } : {}) });
 }
