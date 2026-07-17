@@ -67,11 +67,15 @@ const RETAILER_CONFIGS: RetailerSearchConfig[] = [
     cardSelectors: ["div[data-component-type='s-search-result']"],
     idAttribute: { name: "data-asin", toUrl: (asin) => `https://www.amazon.sa/dp/${asin}` },
     linkSelectors: ["h2 a"],
-    // "h2 a" (the whole anchor's text) first -- not "h2 a span", which
-    // grabs only the first of several inner spans (often just a leading
-    // brand-name fragment like "Samsung" instead of the full title, seen
-    // live 2026-07-17). "h2" alone is the final fallback.
-    titleSelectors: ["h2 a", "h2"],
+    // "h2" (the whole heading) first, not "h2 a": on some Amazon SERP
+    // layouts the anchor wraps only a leading brand-name fragment (e.g.
+    // "Samsung") with the rest of the title as a sibling outside the
+    // anchor, so "h2 a"'s own text is truncated even though it reads as
+    // non-empty. Confirmed live 2026-07-17 -- a prior fix assumed the
+    // opposite order for a different truncation bug ("h2 a span" grabbing
+    // only the first of several inner spans); both are real, "h2" alone
+    // is the one selector that reliably gets the full text either way.
+    titleSelectors: ["h2", "h2 a"],
     priceSelectors: [".a-price .a-offscreen", ".a-price"],
   },
   {
@@ -129,20 +133,23 @@ async function launchBrowser(): Promise<Browser> {
 
 const BLOCKED_RESOURCE_TYPES = new Set(["image", "media", "font", "stylesheet"]);
 
-async function searchRetailer(browser: Browser, config: RetailerSearchConfig, query: string): Promise<FoundItem[]> {
+async function searchRetailer(config: RetailerSearchConfig, query: string): Promise<FoundItem[]> {
+  // A fresh browser per retailer: reusing one browser across sequential
+  // contexts still failed even with resource blocking and no concurrency
+  // ("browserContext.newPage: ...has been closed" on the 2nd retailer,
+  // confirmed live 2026-07-17 via a dedicated GitHub Actions test call) --
+  // @sparticuz/chromium's --single-process flag appears to make the whole
+  // browser unreliable past a single context's lifecycle, not just under
+  // memory pressure. Relaunching is what's actually reliable; blocking
+  // images/fonts/CSS/media (below) is what keeps each retailer's page load
+  // light enough that 3 relaunches still fit inside Vercel's 60s
+  // maxDuration (a full-weight amazon_sa page alone caused a 504 timeout
+  // with this same relaunch-per-retailer approach before blocking was added).
+  const browser = await launchBrowser();
   const context = await browser.newContext({
     viewport: { width: 1366, height: 900 },
     extraHTTPHeaders: { "Accept-Language": "en-US,en;q=0.9" },
   });
-  // Blocking images/fonts/CSS/media cuts a heavy SPA search-results page
-  // (amazon.sa in particular) down to roughly its HTML+JS weight. This is
-  // what actually fixed reliability -- launching a fresh browser per
-  // retailer avoided one crash mode (the shared process dying under memory
-  // pressure after amazon_sa's page, confirmed live 2026-07-17) but made
-  // the 3-retailer request as a whole exceed Vercel's 60s maxDuration
-  // (confirmed via a dedicated GitHub Actions test call: HTTP 504
-  // FUNCTION_INVOCATION_TIMEOUT at exactly 61s). Lowering memory pressure
-  // at the source lets one browser be reused safely again.
   await context.route("**/*", (route) => {
     const type = route.request().resourceType();
     if (BLOCKED_RESOURCE_TYPES.has(type)) return route.abort();
@@ -213,7 +220,7 @@ async function searchRetailer(browser: Browser, config: RetailerSearchConfig, qu
 
     return items;
   } finally {
-    await context.close();
+    await browser.close();
   }
 }
 
@@ -224,35 +231,28 @@ export async function POST(request: Request): Promise<NextResponse> {
     return NextResponse.json({ error: "query is required" }, { status: 400 });
   }
 
-  const browser = await launchBrowser();
-  try {
-    // Sequential, one browser shared across retailers, each with its own
-    // context (see searchRetailer's comment on why -- and why concurrent
-    // contexts aren't used either, that's what led to this design).
-    const summary: { retailer: string; status: "fulfilled" | "rejected"; found: number; reason?: string }[] = [];
-    const liveResults: LiveSearchResult[] = [];
-    for (const config of RETAILER_CONFIGS) {
-      try {
-        const found = await searchRetailer(browser, config, query);
-        let count = 0;
-        for (const item of found) {
-          const parsed = item.priceText ? parsePrice(item.priceText) : null;
-          if (!parsed) continue;
-          liveResults.push({ retailerSlug: config.slug, url: item.url, title: item.title, price: parsed.amount, currency: parsed.currency });
-          count++;
-        }
-        summary.push({ retailer: config.slug, status: "fulfilled", found: count });
-      } catch (err) {
-        summary.push({ retailer: config.slug, status: "rejected", found: 0, reason: err instanceof Error ? err.message : String(err) });
+  // Sequential, each with its own browser (see searchRetailer's comment).
+  const summary: { retailer: string; status: "fulfilled" | "rejected"; found: number; reason?: string }[] = [];
+  const liveResults: LiveSearchResult[] = [];
+  for (const config of RETAILER_CONFIGS) {
+    try {
+      const found = await searchRetailer(config, query);
+      let count = 0;
+      for (const item of found) {
+        const parsed = item.priceText ? parsePrice(item.priceText) : null;
+        if (!parsed) continue;
+        liveResults.push({ retailerSlug: config.slug, url: item.url, title: item.title, price: parsed.amount, currency: parsed.currency });
+        count++;
       }
+      summary.push({ retailer: config.slug, status: "fulfilled", found: count });
+    } catch (err) {
+      summary.push({ retailer: config.slug, status: "rejected", found: 0, reason: err instanceof Error ? err.message : String(err) });
     }
-
-    const errors = summary.filter((s) => s.status === "rejected").map((s) => `${s.retailer}: ${s.reason}`);
-
-    console.log("[track] summary", query, summary);
-
-    return NextResponse.json({ results: liveResults, ...(errors.length > 0 ? { partialErrors: errors } : {}) });
-  } finally {
-    await browser.close();
   }
+
+  const errors = summary.filter((s) => s.status === "rejected").map((s) => `${s.retailer}: ${s.reason}`);
+
+  console.log("[track] summary", query, summary);
+
+  return NextResponse.json({ results: liveResults, ...(errors.length > 0 ? { partialErrors: errors } : {}) });
 }
