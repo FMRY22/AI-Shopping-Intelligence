@@ -1,33 +1,105 @@
 name: diagnose-retailers
 
-# Throwaway diagnostic, not a product feature: checking whether Jarir and
-# Amazon product pages expose an og:image meta tag, which would let a
-# one-time backfill fill in image_url for products favorited before
-# 2026-07-17's fix (which stored null for all of them) without needing a
-# browser -- just a plain fetch + regex per product page. To be deleted
-# once answered.
+# One-time data backfill, not a recurring product feature: products
+# favorited before 2026-07-17's fix (which started storing image_url on
+# /api/favorite) have image_url = null in the database, so their cards
+# show a placeholder instead of a photo -- confirmed by inspecting the
+# deployed page's server-rendered product list. This fills them in by
+# fetching each product's real page and pulling its image out of markup
+# that's confirmed present without needing a browser:
+#   - jarir: <meta property="og:image" content="...">
+#   - amazon_sa: data-old-hires="..." on the #landingImage element
+#   - extra: og:image best-effort (untested, extra's search page is
+#     Cloudflare-blocked for this runner, but a plain product-page GET is
+#     a different request and may not be)
+# Uses the same SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY secrets the
+# worker-*.yml workflows already use. Delete this file once the backfill
+# has run successfully.
 on:
   workflow_dispatch:
 
 jobs:
-  probe:
+  backfill:
     runs-on: ubuntu-latest
-    timeout-minutes: 3
+    timeout-minutes: 5
     steps:
-      - name: Check og:image on sample product pages
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Backfill missing product images
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: |
-          for pair in \
-            "jarir|https://www.jarir.com/sa-en/apple-macbook-neo-laptops-678954.html" \
-            "amazon|https://www.amazon.sa/dp/B0GL948QH1"; do
-            name="${pair%%|*}"
-            url="${pair#*|}"
-            echo "=== $name ==="
-            curl -sS "$url" \
-              -A "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36" \
-              -o page.html -w "HTTP_STATUS:%{http_code} SIZE:%{size_download}\n"
-            grep -oE '<meta[^>]*property="og:image"[^>]*>' page.html | head -2 || echo "no og:image found"
-            echo "--- landingImage / data-a-dynamic-image / data-old-hires hints ---"
-            grep -oE 'id="landingImage"[^>]{0,300}' page.html | head -1 || true
-            grep -oE 'data-old-hires="[^"]*"' page.html | head -1 || true
-            grep -oE '"hiRes":"[^"]*"' page.html | head -1 || true
-          done
+          cat > backfill.mjs <<'EOF'
+          const { SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY } = process.env;
+          const headers = {
+            apikey: SUPABASE_SERVICE_ROLE_KEY,
+            Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+            "Content-Type": "application/json",
+          };
+
+          const retailersRes = await fetch(`${SUPABASE_URL}/rest/v1/retailers?select=id,slug`, { headers });
+          const retailers = await retailersRes.json();
+          const slugById = Object.fromEntries(retailers.map((r) => [r.id, r.slug]));
+
+          const productsRes = await fetch(
+            `${SUPABASE_URL}/rest/v1/products?select=id,retailer_id,url,title_en&image_url=is.null`,
+            { headers },
+          );
+          const products = await productsRes.json();
+          console.log(`found ${products.length} products with no image_url`);
+
+          function extractImage(slug, html) {
+            if (slug === "jarir" || slug === "extra") {
+              const m = html.match(/<meta[^>]*property="og:image"[^>]*content="([^"]+)"/);
+              if (m) return m[1];
+            }
+            if (slug === "amazon_sa") {
+              const hires = html.match(/data-old-hires="([^"]+)"/);
+              if (hires && hires[1]) return hires[1];
+              const dyn = html.match(/data-a-dynamic-image="\{&quot;([^&]+)&quot;/);
+              if (dyn) return dyn[1];
+            }
+            return null;
+          }
+
+          let updated = 0;
+          let skipped = 0;
+          for (const p of products) {
+            const slug = slugById[p.retailer_id];
+            try {
+              const pageRes = await fetch(p.url, {
+                headers: {
+                  "User-Agent":
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36",
+                },
+              });
+              const html = await pageRes.text();
+              const image = extractImage(slug, html);
+              if (!image) {
+                console.log(`SKIP ${slug} ${p.id} "${p.title_en}" -- no image found (status ${pageRes.status})`);
+                skipped++;
+                continue;
+              }
+              const patchRes = await fetch(`${SUPABASE_URL}/rest/v1/products?id=eq.${p.id}`, {
+                method: "PATCH",
+                headers,
+                body: JSON.stringify({ image_url: image }),
+              });
+              if (!patchRes.ok) {
+                console.log(`PATCH FAILED ${slug} ${p.id}: ${patchRes.status} ${await patchRes.text()}`);
+                skipped++;
+                continue;
+              }
+              console.log(`OK ${slug} ${p.id} "${p.title_en}" -> ${image}`);
+              updated++;
+            } catch (err) {
+              console.log(`ERROR ${slug} ${p.id}: ${err.message}`);
+              skipped++;
+            }
+          }
+          console.log(`done: ${updated} updated, ${skipped} skipped`);
+          EOF
+          node backfill.mjs
