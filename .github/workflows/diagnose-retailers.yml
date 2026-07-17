@@ -1,0 +1,49 @@
+name: diagnose-retailers
+
+# Throwaway diagnostic, not a product feature: checking why Jarir's search
+# for "laptop" via /api/track returned iPhones/iPad instead of laptops
+# (2026-07-17). Hypothesis: Jarir's search found 0 real matches for
+# "laptop" and redirected/fell back to a generic "Default Category" page
+# whose recommended-product tiles happen to use the same .product-tile
+# class our selector now matches. Checking (1) whether the raw HTML for
+# q=laptop actually contains laptop products anywhere, and (2) whether a
+# term Jarir definitely stocks (q=hp, a known laptop brand they carry)
+# returns real, on-topic matches with the same selector -- to tell apart
+# "selector matches the wrong section of a real results page" from
+# "selector is fine, this specific query just has no results". To be
+# deleted once answered.
+on:
+  workflow_dispatch:
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Fetch Jarir q=laptop and inspect
+        run: |
+          curl -sS -A "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36" \
+            "https://www.jarir.com/sa-en/catalogsearch/result/?q=laptop" \
+            -o laptop.html -w "HTTP_STATUS:%{http_code}\nSIZE:%{size_download}\n"
+          echo "--- title ---"
+          grep -oE "<title>[^<]*</title>" laptop.html || true
+          echo "--- occurrences of the word 'laptop' (case-insensitive) ---"
+          grep -io "laptop" laptop.html | wc -l
+          echo "--- any 'no results' / 'did you mean' messaging ---"
+          grep -io "no results\|didn.t match\|did you mean\|0 results\|no search results" laptop.html | sort -u | head -5
+          echo "--- result count element hints (class containing 'result' or 'count') ---"
+          grep -oE "class=\"[^\"]*(result|count|toolbar-amount)[^\"]*\"[^>]*>[^<]{0,80}" laptop.html | head -10
+          echo "--- first product-title block raw (to see whitespace shape) ---"
+          grep -oE "<[a-z0-9]+ class=\"product-title[^\"]*\"[^>]*>.{0,400}" laptop.html | head -1
+
+      - name: Fetch Jarir q=hp (known laptop brand) and inspect
+        run: |
+          curl -sS -A "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36" \
+            "https://www.jarir.com/sa-en/catalogsearch/result/?q=hp" \
+            -o hp.html -w "HTTP_STATUS:%{http_code}\nSIZE:%{size_download}\n"
+          echo "--- title ---"
+          grep -oE "<title>[^<]*</title>" hp.html || true
+          echo "--- occurrences of 'laptop' for q=hp ---"
+          grep -io "laptop" hp.html | wc -l
+          echo "--- first few product-title texts (raw) ---"
+          grep -oE "<[a-z0-9]+ class=\"product-title[^\"]*\"[^>]*>.{0,200}" hp.html | head -5
