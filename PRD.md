@@ -7,7 +7,9 @@
 | **Owner** | Fahad (founder, sole user) |
 | **Last updated** | 2026-07-18 |
 
-> **Revision note (2026-07-18).** The original draft (2026-07-10) scoped this as a public, multi-tenant SaaS platform — proactive notifications, coupon/cashback aggregation, social-signal monitoring, monetization, B2B data products, admin roles, millions of users. Founder decision: **this is a personal tool, for one user, with no monetization and no other users.** This revision cuts the document down to the actual product the founder wants. Sections that described the abandoned SaaS ambition are trimmed or removed rather than kept as unused aspiration — anything cut is listed explicitly in §14 so it's clear what was a deliberate decision vs. an oversight. `FR-N` numbering is left untouched even where a requirement is now cut, because `API.md`, `ARCHITECTURE.md`, `DATABASE.md`, `AI_AGENTS.md`, `UI.md`, `WORKERS.md`, and several source files already cite specific FR numbers — renumbering would silently break those cross-references. Each FR below is tagged **Active** or **Cut** instead.
+> **Revision note (2026-07-18).** The original draft (2026-07-10) scoped this as a public, multi-tenant SaaS platform — proactive notifications, coupon/cashback aggregation, social-signal monitoring, monetization, B2B data products, admin roles, millions of users. Founder decision: **this is a personal tool, for one user, with no monetization and no other users.** This revision cuts the document down to the actual product the founder wants. Sections that described the abandoned SaaS ambition are trimmed or removed rather than kept as unused aspiration — anything cut is listed explicitly in §8 so it's clear what was a deliberate decision vs. an oversight. `FR-N` numbering is left untouched even where a requirement is now cut, because `API.md`, `ARCHITECTURE.md`, `DATABASE.md`, `AI_AGENTS.md`, `UI.md`, `WORKERS.md`, and several source files already cite specific FR numbers — renumbering would silently break those cross-references. Each FR below is tagged **Active** or **Cut** instead.
+>
+> **Revision note (2026-07-18, same day, follow-up).** Five of the "cut" items were reinstated at the founder's request: **proactive notifications, coupons, cashback, review analysis, and social-media monitoring.** These are still single-user (alerts go to the founder only, same as everything else in this doc) — the cut is monetization/multi-tenancy/admin, not the intelligence features themselves. Updated throughout §1, §3, §4, §5, §8, §9.
 
 ---
 
@@ -26,7 +28,15 @@ Concretely:
 4. **See price history**, not just today's number — for anything tracked, a chart of price over time.
 5. **Get a buy-or-wait signal** grounded in that history (e.g., "this is within 2% of its 90-day low" or "this has never been this cheap before, no reason to wait"), with the reasoning shown — not a black-box score.
 
-Nothing beyond this is being built right now. See §14 for the full list of what that excludes.
+On top of that core loop, for anything the founder has favorited/tracked, the tool should also actively watch for and surface (§4 Phase 2):
+
+6. **Coupons** — valid codes for that product/retailer, auto-revalidated so expired codes don't get surfaced as live.
+7. **Cashback** — available cashback offers for that product/retailer.
+8. **Review signal** — a synthesized read of reviews (native + relevant social discussion), not just a star average.
+9. **Social/community mentions** — relevant Reddit/X/YouTube/TikTok chatter about the product.
+10. **Proactive alerts** — when any of the above changes materially (price drop, new coupon, restock, review-sentiment shift), the founder gets notified without having to open the app and check.
+
+Nothing beyond this is being built right now. See §8 for the full list of what that excludes.
 
 ---
 
@@ -43,9 +53,10 @@ Nothing beyond this is being built right now. See §14 for the full list of what
 | This IS | This is NOT |
 |---|---|
 | A personal tool for one user (the founder) | A multi-tenant product for public users |
-| A multi-retailer price comparison, one query at a time | A 24/7 background watcher with proactive notifications |
+| A multi-retailer price comparison, one query at a time | A single-retailer tool |
 | Price history as a first-class feature (not just today's price) | A single-snapshot price checker |
 | An explainable buy/wait signal — every answer shows its reasoning | A black-box "trust us" score |
+| A 24/7 watcher on favorited products — coupons, cashback, reviews, social buzz — that alerts the founder proactively | A tool the founder has to remember to open and check |
 | Free to run — $0 or near-$0 infra cost, no monetization | A business with a monetization strategy |
 
 ---
@@ -59,13 +70,23 @@ Nothing beyond this is being built right now. See §14 for the full list of what
 - Card-grid UI with search, live results, and a tracked list.
 - Scheduled per-retailer workers (`workers/*`) that keep tracked products' prices fresh and append to `price_history`.
 
-### Active roadmap (the three things in §1, in build order)
+### Phase 1 — the core loop (§1, items 1–5)
 1. **Best-price highlighting** — when live search returns results from multiple retailers, visually mark the cheapest one instead of leaving the user to compare prices by eye.
 2. **Price history chart** (FR-17) — the data is already being collected (`price_history` table, written by the scheduled workers); needs a chart view per tracked product.
 3. **Buy-or-wait signal** (FR-9, simplified) — starts as a simple, explainable rule against the accumulated price history (e.g., current price vs. historical min/median/percentile), not an LLM agent from day one. An LLM-backed version is a possible later upgrade, not a prerequisite for shipping v1 of this.
 
-### Explicitly not planned (see §14 for the full cut list)
-Coupons, cashback, review synthesis, social/community monitoring, proactive notifications, standing-criteria watchlists, an admin panel, alternative-product suggestions, trend detection, and any regional expansion beyond Saudi Arabia.
+### Phase 2 — watching favorited products (§1, items 6–10)
+Only applies to products the founder has already favorited/tracked — not a standing-criteria/catalog-wide watch (that stays cut, §8).
+4. **Coupons** (FR-4) — per-retailer coupon ingestion + auto-revalidation for tracked products.
+5. **Cashback** (FR-5) — per-retailer cashback offers for tracked products.
+6. **Reviews** (FR-6, FR-12) — collect + synthesize into a short verdict, not just a star average.
+7. **Social/community monitoring** (FR-7) — Reddit/X/YouTube/TikTok mentions relevant to tracked products.
+8. **Proactive notifications** (FR-16, FR-20) — push/email to the founder only, triggered by material changes from any of the above (price drop, new coupon, restock, review-sentiment shift), with quiet hours.
+
+Phase 2 comes after Phase 1 because each item is effectively a new worker (mirroring the existing `workers/*` pattern) plus, for reviews/social, a genuine AI-reasoning step (`AI_AGENTS.md`) — bigger builds than Phase 1's UI/data-shaping work on data already being collected.
+
+### Explicitly not planned (see §8 for the full cut list)
+Standing-criteria watchlists (beyond favoriting specific items), an admin panel, alternative-product suggestions, trend detection, BNPL/financing comparison, and any regional expansion beyond Saudi Arabia.
 
 ---
 
@@ -77,27 +98,27 @@ Original FR numbering preserved for cross-document traceability (`API.md`, `ARCH
 - **FR-1** — 🔲 Cut. Continuous catalog discovery (crawl every product from a retailer without a search). Not needed — search is on-demand, not a standing catalog.
 - **FR-2** — ✅ Active. Full price history per product (source, currency, timestamp) — required for §1.4 and the buy/wait signal.
 - **FR-3** — 🔲 Cut. Automated fake-discount detection as a distinct flagged feature — folded conceptually into the buy/wait signal (FR-9) instead of being its own output.
-- **FR-4** — 🔲 Cut. Coupon ingestion/validation.
-- **FR-5** — 🔲 Cut. Cashback ingestion.
-- **FR-6** — 🔲 Cut. Review collection/structuring.
-- **FR-7** — 🔲 Cut. Social/community monitoring.
+- **FR-4** — ✅ Active. Coupon ingestion + auto-revalidation, scoped to favorited/tracked products (§4 Phase 2).
+- **FR-5** — ✅ Active. Cashback ingestion, scoped to favorited/tracked products (§4 Phase 2).
+- **FR-6** — ✅ Active. Review collection/structuring, scoped to favorited/tracked products (§4 Phase 2).
+- **FR-7** — ✅ Active. Social/community monitoring, scoped to favorited/tracked products (§4 Phase 2).
 - **FR-8** — ✅ Active. Worker independence (one retailer's worker failing must not affect another) — already true by construction (`WORKERS.md`), kept because it's free and already built.
 
 ### 5.2 Intelligence
 - **FR-9** — ✅ Active (simplified). Buy-now-vs-wait signal with a human-readable reason, grounded in price history. No "buy the alternative" branch (that's FR-10, cut) — just buy now or wait, and why.
 - **FR-10** — 🔲 Cut. Alternative-product recommendation.
-- **FR-11** — 🔲 Cut. Coupon+cashback stacking (depends on FR-4/FR-5, both cut).
-- **FR-12** — 🔲 Cut. Review synthesis (depends on FR-6, cut).
+- **FR-11** — ✅ Active. Coupon+cashback stacking — surface the best available combination for a tracked product (depends on FR-4/FR-5, both now active).
+- **FR-12** — ✅ Active. Review synthesis into a short cited verdict (depends on FR-6, now active).
 - **FR-13** — 🔲 Cut. Trend/demand-spike detection.
 - **FR-14** — ✅ Active, but scope changes with it. "Re-run AI analysis only on material change" still applies once FR-9 exists, so the (now much smaller) AI budget isn't wasted.
 
 ### 5.3 User-Facing
 - **FR-15** — 🔲 Cut as originally written (standing criteria like "any laptop under 3000 SAR"). What's kept: favoriting a specific search result to track it — already built, effectively a simpler FR-15.
-- **FR-16** — 🔲 Cut. Proactive push/email notifications.
-- **FR-17** — ✅ Active. Price history chart per product — next up, §4.
+- **FR-16** — ✅ Active. Proactive push/email notifications — single recipient (the founder), triggered by Phase 2 signals (§4).
+- **FR-17** — ✅ Active. Price history chart per product — next up, §4 Phase 1.
 - **FR-18** — ✅ Active. Search/browse with price as a first-class signal (already built at `apps/web/src/app/api/track/route.ts`, `apps/web/src/app/page.tsx`); "best price" highlighting (§4) extends this.
 - **FR-19** — ✅ Active, informal. Bilingual EN/AR labels already present in the UI (`apps/web/src/components/product-browser.tsx`) as a nice-to-have; full RTL-first redesign is not a priority for a single Arabic-fluent user who's also comfortable reading English UI strings.
-- **FR-20** — 🔲 Cut. Notification quiet hours (depends on FR-16, cut).
+- **FR-20** — ✅ Active. Notification quiet hours (depends on FR-16, now active) — still useful with one recipient.
 
 ### 5.4 Admin / Ops
 - **FR-21, FR-22, FR-23** — 🔲 Cut. No admin panel, no worker-health UI, no manual verdict overrides — the founder is the only operator and can read GitHub Actions run logs directly.
@@ -112,8 +133,10 @@ Original FR numbering preserved for cross-document traceability (`API.md`, `ARCH
 | **Reliability** | One retailer's worker breaking must not affect the others (already true — independent GitHub Actions workflows per retailer). |
 | **Performance** | Live search should return in well under the current ~30s ceiling where possible; not a hard SLA at personal scale. |
 | **Maintainability** | Typed end-to-end (TypeScript), so the founder (with AI assistance) can keep extending it without re-learning the codebase each time. |
+| **Legal/ToS risk** | Coupon, review, and social-monitoring sources (§4 Phase 2) carry real ToS/legal exposure per source — respect robots.txt, no circumvention of access controls, documented per-source in `WORKERS.md` before each ships. Not dropped just because the audience is one person. |
+| **Data minimization** | Scraped reviews/social content can incidentally contain other people's personal data (reviewer names/handles) — Saudi PDPL applies regardless of single-user scale, so store only what's needed for the synthesized verdict, not raw scraped text indefinitely. |
 
-Scale targets (millions of users, 99.9% uptime, sub-300ms search), PDPL compliance program, and security hardening beyond "don't leak secrets, use RLS" are dropped — they were sized for a public product this no longer is.
+Scale targets (millions of users, 99.9% uptime, sub-300ms search) and a formal compliance program are dropped — they were sized for a public product this no longer is. Basic PDPL care (data minimization above) stays, since it's triggered by processing *any* Saudi resident's personal data, not by user count.
 
 ---
 
@@ -126,10 +149,9 @@ None. Single user, no ads, no affiliate links, no subscriptions, no B2B data pro
 ## 8. Explicitly Out of Scope
 
 - Any user other than the founder; accounts, auth, or multi-tenancy.
-- Proactive notifications (push/email/WhatsApp/SMS) of any kind.
-- Coupons, cashback, BNPL/financing comparison.
-- Review collection or synthesis.
-- Social/community monitoring (Reddit/X/YouTube/TikTok).
+- WhatsApp/SMS notification channels (push + email only, FR-16) — not never, just not now.
+- BNPL/financing total-cost comparison.
+- Standing-criteria watchlists (e.g., "any laptop under 3000 SAR") — favoriting a specific product is the only tracking mechanism.
 - Trend/demand-spike detection, a "Shopping Planner" tied to Ramadan/White Friday/etc.
 - Alternative-product recommendations.
 - An admin panel or any ops UI beyond what GitHub Actions already provides.
@@ -145,11 +167,22 @@ None. Single user, no ads, no affiliate links, no subscriptions, no B2B data pro
 |---|---|
 | Retailers block scraping (already true for extra) | Accept the gap where it isn't worth chasing (documented in `apps/web/src/app/api/track/route.ts`); fail safely, never fabricate results. |
 | Buy/wait signal is wrong and misleads the one user who relies on it | Keep it explainable (show the actual history/reasoning, not just a verdict) so it's easy to sanity-check, not blindly trusted. |
+| Stale/invalid coupon codes surfaced as valid (FR-4) | Auto-revalidate, don't rely on user reports as the only signal. |
+| Social/community/review sources block or rate-limit scraping (FR-6/FR-7) | Respect robots.txt/ToS per source; fail safely per source, same principle already applied to extra. |
+| Notification channel has a hard single-recipient ceiling (email via unverified sending domain, per `DEPLOYMENT.md`) | Fine as-is at one user — flagged only so it's not mistaken for a bug later. |
 
 ---
 
 ## 10. Next Steps
 
-1. Add best-price highlighting to live search results (§4, item 1).
+Phase 1 (build now):
+1. Add best-price highlighting to live search results (§4 Phase 1, item 1).
 2. Build the price history chart view (FR-17).
 3. Ship a first, simple, rule-based buy/wait signal (FR-9) against existing `price_history` data.
+
+Phase 2 (after Phase 1 ships):
+4. Coupon worker + auto-revalidation for tracked products (FR-4).
+5. Cashback worker for tracked products (FR-5), then coupon+cashback stacking (FR-11).
+6. Review collection + synthesis for tracked products (FR-6, FR-12).
+7. Social/community monitoring for tracked products (FR-7).
+8. Proactive notifications tying the above together, single recipient, with quiet hours (FR-16, FR-20).
