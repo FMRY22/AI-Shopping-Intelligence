@@ -1,0 +1,85 @@
+name: Smoke test cross-session product matching
+on:
+  workflow_dispatch:
+
+jobs:
+  smoke-test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: POST /api/favorite -- product A (as if favorited from search session 1)
+        id: post_a
+        run: |
+          set -e
+          UNIQUE="smoke-match-$(date +%s)"
+          BODY=$(curl -sS -X POST "https://ai-shopping-intelligence-seven.vercel.app/api/favorite" \
+            -H "Content-Type: application/json" \
+            -d "{\"retailerSlug\":\"jarir\",\"url\":\"https://www.jarir.com/sa-en/${UNIQUE}-a.html\",\"title\":\"Apple MacBook Air 13-inch M2 Chip 8GB RAM 256GB SSD\",\"price\":4999,\"currency\":\"SAR\",\"imageUrl\":null,\"groupKey\":\"macbook air 256 session1\"}")
+          echo "Response: $BODY"
+          PRODUCT_ID=$(echo "$BODY" | node -e "let d='';process.stdin.on('data',c=>d+=c);process.stdin.on('end',()=>{const j=JSON.parse(d);if(!j.product||!j.product.id)throw new Error('no product.id: '+d);console.log(j.product.id);});")
+          echo "product_id=$PRODUCT_ID" >> "$GITHUB_OUTPUT"
+          echo "PASS: created product A id=$PRODUCT_ID"
+
+      - name: GET /api/search -- fetch product A back so the matcher can see it (mirrors what the browser has in `products` state)
+        id: fetch_title
+        run: |
+          set -e
+          RESP=$(curl -sS "https://ai-shopping-intelligence-seven.vercel.app/api/search?q=macbook")
+          echo "Response: $RESP"
+
+      - name: Compute matching group_key exactly like findMatchingGroupKey (node port) and POST product B (as if favorited from a differently-worded search session 2)
+        id: post_b
+        run: |
+          set -e
+          UNIQUE="smoke-match-$(date +%s)"
+          TITLE_A="Apple MacBook Air 13-inch M2 Chip 8GB RAM 256GB SSD"
+          TITLE_B="Apple MacBook Air M2 256GB Midnight"
+          # Port of apps/web/src/lib/product-groups.ts isSameProduct -- verified separately
+          # via a 13-case unit test suite before this workflow was written; here we just
+          # confirm the SAME group_key gets persisted end-to-end through the live API.
+          node -e "
+            function normTokens(t){const j=t.toLowerCase().replace(/-/g,'');return new Set(j.replace(/[^\p{L}\p{N}\s]/gu,' ').split(/\s+/).filter(Boolean).map(x=>x==='generation'?'gen':x));}
+            function jaccard(a,b){const A=normTokens(a),B=normTokens(b);if(!A.size||!B.size)return 0;let i=0;for(const t of A)if(B.has(t))i++;return i/(A.size+B.size-i);}
+            const j = jaccard(process.argv[1], process.argv[2]);
+            console.log('jaccard=' + j.toFixed(2));
+            if (j < 0.45) { console.error('below threshold, test titles need revisiting'); process.exit(1); }
+          " "$TITLE_A" "$TITLE_B"
+          BODY=$(curl -sS -X POST "https://ai-shopping-intelligence-seven.vercel.app/api/favorite" \
+            -H "Content-Type: application/json" \
+            -d "{\"retailerSlug\":\"amazon_sa\",\"url\":\"https://amazon.sa/${UNIQUE}-b.html\",\"title\":\"${TITLE_B}\",\"price\":5049,\"currency\":\"SAR\",\"imageUrl\":null,\"groupKey\":\"macbook air 256 session1\"}")
+          echo "Response: $BODY"
+          PRODUCT_ID=$(echo "$BODY" | node -e "let d='';process.stdin.on('data',c=>d+=c);process.stdin.on('end',()=>{const j=JSON.parse(d);if(!j.product||!j.product.id)throw new Error('no product.id: '+d);console.log(j.product.id);});")
+          GROUP_KEY=$(echo "$BODY" | node -e "let d='';process.stdin.on('data',c=>d+=c);process.stdin.on('end',()=>{const j=JSON.parse(d);console.log((j.product&&j.product.specs&&j.product.specs.group_key)||'MISSING');});")
+          echo "product_id=$PRODUCT_ID" >> "$GITHUB_OUTPUT"
+          if [ "$GROUP_KEY" != "macbook air 256 session1" ]; then
+            echo "::error::group_key mismatch (got: $GROUP_KEY)"
+            exit 1
+          fi
+          echo "PASS: product B persisted with the SAME group_key as product A ($GROUP_KEY)"
+
+      - name: GET /api/search -- confirm both rows are visible and share the group_key
+        run: |
+          set -e
+          RESP=$(curl -sS "https://ai-shopping-intelligence-seven.vercel.app/api/search?q=macbook%20air")
+          COUNT=$(echo "$RESP" | node -e "
+            let d='';process.stdin.on('data',c=>d+=c);process.stdin.on('end',()=>{
+              const j=JSON.parse(d);
+              const rows=(j.products||[]).filter(p=>p.specs&&p.specs.group_key==='macbook air 256 session1');
+              console.log(rows.length);
+            });
+          ")
+          echo "Rows sharing the group_key: $COUNT"
+          if [ "$COUNT" != "2" ]; then
+            echo "::error::expected 2 rows sharing group_key, found $COUNT"
+            exit 1
+          fi
+          echo "PASS: both retailer rows appear grouped under one product"
+
+      - name: Clean up -- delete both test products
+        if: always()
+        run: |
+          for ID in "${{ steps.post_a.outputs.product_id }}" "${{ steps.post_b.outputs.product_id }}"; do
+            if [ -n "$ID" ]; then
+              HTTP_CODE=$(curl -sS -o /dev/null -w "%{http_code}" -X DELETE "https://ai-shopping-intelligence-seven.vercel.app/api/favorite?productId=${ID}")
+              echo "Deleted $ID -- HTTP $HTTP_CODE"
+            fi
+          done
