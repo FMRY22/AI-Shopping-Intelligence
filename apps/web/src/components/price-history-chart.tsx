@@ -1,16 +1,12 @@
-"use client";
-
-import { useEffect, useState } from "react";
-
-interface PricePoint {
+export interface PricePoint {
   price: number;
   currency: string;
   in_stock: boolean;
   scraped_at: string;
 }
 
-const CHART_WIDTH = 560;
-const CHART_HEIGHT = 180;
+const CHART_WIDTH = 640;
+const CHART_HEIGHT = 220;
 const CHART_PADDING = 24;
 
 // Scales by actual elapsed time (not by index), so gaps between price
@@ -37,7 +33,22 @@ function buildPath(points: PricePoint[]): string {
     .join(" ");
 }
 
-function StatTile({ label, value }: { label: string; value: string }) {
+export function PriceChart({ points }: { points: PricePoint[] }) {
+  if (points.length < 2) {
+    return (
+      <p className="flex h-[180px] items-center justify-center text-center text-sm text-gray-400 dark:text-white/30">
+        Not enough history yet — check back after a few price checks. / ما فيه سجل كافٍ لسا — راجع بعد كم فحص للسعر.
+      </p>
+    );
+  }
+  return (
+    <svg viewBox={`0 0 ${CHART_WIDTH} ${CHART_HEIGHT}`} className="w-full">
+      <path d={buildPath(points)} fill="none" stroke="currentColor" strokeWidth={2.5} className="text-indigo-500" />
+    </svg>
+  );
+}
+
+export function StatTile({ label, value }: { label: string; value: string }) {
   return (
     <div className="flex flex-col gap-0.5">
       <span className="text-[11px] text-gray-400 dark:text-white/40">{label}</span>
@@ -46,9 +57,30 @@ function StatTile({ label, value }: { label: string; value: string }) {
   );
 }
 
+export function PriceStats({ points, currency }: { points: PricePoint[]; currency: string }) {
+  const prices = points.map((p) => p.price);
+  const current = prices.length > 0 ? prices[prices.length - 1]! : null;
+  const min = prices.length > 0 ? Math.min(...prices) : null;
+  const max = prices.length > 0 ? Math.max(...prices) : null;
+  const avg = prices.length > 0 ? prices.reduce((a, b) => a + b, 0) / prices.length : null;
+  const vsAvgPct = current != null && avg != null && avg > 0 ? ((current - avg) / avg) * 100 : null;
+
+  return (
+    <div className="grid grid-cols-2 gap-3 border-t border-gray-100 pt-4 dark:border-white/10 sm:grid-cols-4">
+      <StatTile label="Current / الحالي" value={current != null ? `${current.toLocaleString()} ${currency}` : "—"} />
+      <StatTile label="Lowest / الأقل" value={min != null ? `${min.toLocaleString()} ${currency}` : "—"} />
+      <StatTile label="Highest / الأعلى" value={max != null ? `${max.toLocaleString()} ${currency}` : "—"} />
+      <StatTile
+        label="vs. average / عن المتوسط"
+        value={vsAvgPct != null ? `${vsAvgPct > 0 ? "+" : ""}${vsAvgPct.toFixed(0)}%` : "—"}
+      />
+    </div>
+  );
+}
+
 type Verdict = "buy_now" | "wait" | "neutral";
 
-interface BuyWaitSignal {
+export interface BuyWaitSignal {
   verdict: Verdict;
   reasonEn: string;
   reasonAr: string;
@@ -61,7 +93,7 @@ interface BuyWaitSignal {
 // recorded range (near the low / near the high / vs. the average), and
 // the reasoning shown is exactly the number the verdict was decided
 // from -- explainable by construction, not a black-box label.
-function computeBuyWaitSignal(points: PricePoint[]): BuyWaitSignal {
+export function computeBuyWaitSignal(points: PricePoint[]): BuyWaitSignal {
   const prices = points.map((p) => p.price);
   const current = prices[prices.length - 1];
   if (current === undefined) {
@@ -122,108 +154,13 @@ const VERDICT_LABELS: Record<Verdict, string> = {
   neutral: "Fair price / سعر عادل",
 };
 
-function BuyWaitBanner({ signal }: { signal: BuyWaitSignal }) {
+export function BuyWaitBanner({ signal }: { signal: BuyWaitSignal }) {
   return (
-    <div className={`mb-4 rounded-xl px-3 py-2.5 ${VERDICT_STYLES[signal.verdict]}`}>
+    <div className={`rounded-xl px-3 py-2.5 ${VERDICT_STYLES[signal.verdict]}`}>
       <p className="text-sm font-bold">{VERDICT_LABELS[signal.verdict]}</p>
       <p className="mt-0.5 text-xs opacity-90">
         {signal.reasonEn} / {signal.reasonAr}
       </p>
-    </div>
-  );
-}
-
-export function PriceHistoryModal({
-  productId,
-  title,
-  currency,
-  onClose,
-}: {
-  productId: string;
-  title: string;
-  currency: string;
-  onClose: () => void;
-}) {
-  const [points, setPoints] = useState<PricePoint[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    fetch(`/api/price-history?productId=${encodeURIComponent(productId)}`)
-      .then((res) => res.json() as Promise<{ history?: PricePoint[]; error?: string }>)
-      .then((data) => {
-        if (cancelled) return;
-        if (data.error) {
-          setError(data.error);
-          return;
-        }
-        setPoints(data.history ?? []);
-      })
-      .catch((err: unknown) => {
-        if (!cancelled) setError(err instanceof Error ? err.message : String(err));
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [productId]);
-
-  const prices = points?.map((p) => p.price) ?? [];
-  const current = prices.length > 0 ? prices[prices.length - 1] : null;
-  const min = prices.length > 0 ? Math.min(...prices) : null;
-  const max = prices.length > 0 ? Math.max(...prices) : null;
-  const avg = prices.length > 0 ? prices.reduce((a, b) => a + b, 0) / prices.length : null;
-  const vsAvgPct = current != null && avg != null && avg > 0 ? ((current - avg) / avg) * 100 : null;
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 backdrop-blur-sm" onClick={onClose}>
-      <div
-        className="w-full max-w-xl rounded-2xl bg-white p-5 shadow-xl dark:bg-[#131316]"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="mb-4 flex items-start justify-between gap-3">
-          <p className="line-clamp-2 text-sm font-semibold text-gray-900 dark:text-white">{title}</p>
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label="Close"
-            className="shrink-0 rounded-full p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-700 dark:text-white/40 dark:hover:bg-white/10 dark:hover:text-white"
-          >
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="h-5 w-5">
-              <path d="M18 6 6 18M6 6l12 12" />
-            </svg>
-          </button>
-        </div>
-
-        {error && <p className="text-sm text-red-600 dark:text-red-400">{error}</p>}
-
-        {!error && points === null && (
-          <p className="py-8 text-center text-sm text-gray-400 dark:text-white/30">Loading… / جارِ التحميل...</p>
-        )}
-
-        {!error && points !== null && points.length < 2 && (
-          <p className="py-8 text-center text-sm text-gray-400 dark:text-white/30">
-            Not enough history yet — check back after a few price checks. / ما فيه سجل كافٍ لسا — راجع بعد كم فحص للسعر.
-          </p>
-        )}
-
-        {!error && points !== null && points.length >= 2 && (
-          <>
-            <BuyWaitBanner signal={computeBuyWaitSignal(points)} />
-            <svg viewBox={`0 0 ${CHART_WIDTH} ${CHART_HEIGHT}`} className="w-full">
-              <path d={buildPath(points)} fill="none" stroke="currentColor" strokeWidth={2} className="text-indigo-500" />
-            </svg>
-            <div className="mt-4 grid grid-cols-4 gap-3 border-t border-gray-100 pt-4 dark:border-white/10">
-              <StatTile label="Current / الحالي" value={current != null ? `${current.toLocaleString()} ${currency}` : "—"} />
-              <StatTile label="Lowest / الأقل" value={min != null ? `${min.toLocaleString()} ${currency}` : "—"} />
-              <StatTile label="Highest / الأعلى" value={max != null ? `${max.toLocaleString()} ${currency}` : "—"} />
-              <StatTile
-                label="vs. average / عن المتوسط"
-                value={vsAvgPct != null ? `${vsAvgPct > 0 ? "+" : ""}${vsAvgPct.toFixed(0)}%` : "—"}
-              />
-            </div>
-          </>
-        )}
-      </div>
     </div>
   );
 }
