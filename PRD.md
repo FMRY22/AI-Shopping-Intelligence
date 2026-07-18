@@ -1,300 +1,155 @@
 # Product Requirements Document (PRD)
-## AI Shopping Intelligence Platform — Saudi Arabia → MENA
+## AI Shopping Intelligence — Personal Project (Saudi Arabia)
 
 | | |
 |---|---|
-| **Status** | Draft v1.0 — Awaiting stakeholder review |
-| **Owner** | CTO / Principal Architect (Claude) |
-| **Phase** | 1 of 10 — Product Requirements |
-| **Last updated** | 2026-07-10 |
-| **Next document** | `ARCHITECTURE.md` (Phase 2) — not started, pending approval of this PRD |
+| **Status** | Active — descoped to personal-project scope |
+| **Owner** | Fahad (founder, sole user) |
+| **Last updated** | 2026-07-18 |
 
-> **Governance note.** This PRD is the source of truth for *what* we are building and *why*. It intentionally does **not** decide database schemas, queue topologies, or infrastructure sizing — those belong to Phases 2–4. The tech stack/monorepo layout named in the original brief (Next.js, Railway, Supabase, Redis, Playwright, etc.) is the **default direction**, but per founder decision (2026-07-10, §17 Q5), it is **open for re-evaluation in Phase 2** if a concretely better alternative exists for a given component — any deviation must be explicitly compared and justified in `ARCHITECTURE.md`, not swapped silently.
+> **Revision note (2026-07-18).** The original draft (2026-07-10) scoped this as a public, multi-tenant SaaS platform — proactive notifications, coupon/cashback aggregation, social-signal monitoring, monetization, B2B data products, admin roles, millions of users. Founder decision: **this is a personal tool, for one user, with no monetization and no other users.** This revision cuts the document down to the actual product the founder wants. Sections that described the abandoned SaaS ambition are trimmed or removed rather than kept as unused aspiration — anything cut is listed explicitly in §14 so it's clear what was a deliberate decision vs. an oversight. `FR-N` numbering is left untouched even where a requirement is now cut, because `API.md`, `ARCHITECTURE.md`, `DATABASE.md`, `AI_AGENTS.md`, `UI.md`, `WORKERS.md`, and several source files already cite specific FR numbers — renumbering would silently break those cross-references. Each FR below is tagged **Active** or **Cut** instead.
 
 ---
 
-## 1. Executive Summary
+## 1. What This Is
 
-We are building an **AI Shopping Intelligence Platform** for Saudi Arabia, expanding later to the GCC and broader MENA region. It is not a deals aggregator, not a price tracker, and not a coupon site — those are *features*, not the product. The product is a continuously-running intelligence system that:
+A personal shopping-intelligence tool covering the main Saudi retailers (Amazon.sa, Jarir, extra, Noon). One user: the founder. The core loop, in the founder's own words:
 
-1. **Watches** the shopping ecosystem 24/7 (retailer catalogs, prices, coupons, cashback offers, reviews, social/community chatter) without any user action.
-2. **Understands** each product and each user well enough to know what matters (price drop, restock, better alternative, coupon stacking opportunity, financing option) before the user asks.
-3. **Acts** by surfacing a ranked, explained recommendation — "buy now," "wait N days," "buy the alternative instead," complete with the reasoning — through push notifications, a web app, and (later) other channels.
+> "ابحث عن منتج يعطيني كل الخيارات في السوق، ويوريني وين افضل سعر وكم كان السعر، وهل اشتري او انتظر بناءً على توقعات مدروسة."
+> *(Search for a product, get every option available in the market, see where the best price is and what the price has been, and get a buy-or-wait answer grounded in an informed prediction — not a guess.)*
 
-The platform's defensibility is not any single feature — it's the compounding data asset (price history, review sentiment, social signal, coupon/cashback graph) built by continuous collection, and the AI layer that turns that data into a decision, not a spreadsheet.
+Concretely:
 
----
+1. **Search** a product by name.
+2. **See every current option** across tracked retailers in one place — title, price, retailer, link, image, side by side.
+3. **See the best price at a glance** — the cheapest option among the results should be obvious, not something to eyeball across cards.
+4. **See price history**, not just today's number — for anything tracked, a chart of price over time.
+5. **Get a buy-or-wait signal** grounded in that history (e.g., "this is within 2% of its 90-day low" or "this has never been this cheap before, no reason to wait"), with the reasoning shown — not a black-box score.
 
-## 2. Vision & Mission
-
-**Vision:** Become the trusted shopping brain of Saudi Arabia and, over time, the Middle East — the default place people check, and increasingly the default channel that reaches *them*, before they buy anything online.
-
-**Mission:** Continuously collect and understand the entire online shopping landscape, and use AI to tell every user the smartest possible buying decision, proactively, in their language, in their currency, on their schedule (Ramadan, White Friday, National Day, back-to-school).
-
----
-
-## 3. Problem Statement
-
-Saudi/GCC online shoppers today face a fragmented, manual, and reactive experience:
-
-- **Fragmentation.** Prices, coupons, and cashback live on different sites (Noon, Amazon.sa, Jarir, extra, Namshi, SACO, Danube, IKEA KSA, and dozens of Salla/Zid-powered independent stores) with no unified view.
-- **No price memory.** Shoppers cannot tell if "50% OFF" badges reflect a real discount or an inflated reference price — a well-documented problem in mature markets (solved elsewhere by CamelCamelCamel/Keepa-style price history, which barely exists for the Saudi market).
-- **Manual coupon/cashback hunting.** Users must separately search coupon sites and cashback portals and manually stack them, and BNPL vs. cash vs. credit-card-installment total-cost comparison is essentially nonexistent as a decision tool. 42% of Saudi consumers already use BNPL (Tabby/Tamara), so financing terms are now a first-class part of the "should I buy this" decision, not a footnote.
-- **No proactive intelligence.** Existing regional tools (if any) require the user to search. Nobody is watching on the user's behalf and interrupting them only when it matters.
-- **Trust gap.** Reviews are scattered across the retailer's own site, YouTube unboxings, Reddit/X/TikTok discussions in Arabic and English — nobody synthesizes them into a single trustworthy verdict.
-- **Underserved bilingual/RTL experience.** Global tools (Honey, Slickdeals, CamelCamelCamel) are English-only, USD-centric, and do not track Saudi retailers, Mada/STC Pay/BNPL payment rails, or Saudi-specific shopping calendar events.
+Nothing beyond this is being built right now. See §14 for the full list of what that excludes.
 
 ---
 
-## 4. Market Context (grounding, not a decision)
+## 2. Problem Statement (why this is still worth building, even at personal scale)
 
-Used to size ambition and validate urgency, not to lock in a launch date.
-
-- Saudi Arabia's e-commerce market is in a high-growth phase; independent market-research firms (IMARC, Statista, Grand View Research, Mordor Intelligence, ResearchAndMarkets) put it in the low-tens-of-billions-USD range in 2025–2026 with double-digit CAGR (~11–12%) through the early 2030s, driven by Vision 2030 digital infrastructure (~99% internet penetration, ~78% 5G coverage). Exact figures vary by methodology — treat any single number as directional, not authoritative. [Sources: imarcgroup.com, statista.com, grandviewresearch.com, mordorintelligence.com]
-- B2C already dominates (~74% of e-commerce revenue in 2025), meaning our initial focus on consumer-facing shopping intelligence targets the largest and fastest-growing slice, not a niche. [Sources: same as above]
-- BNPL is mainstream, not fringe: 42% of Saudi consumers report having used BNPL (Tabby/Tamara duopoly, both headquartered in/around Saudi Arabia as of 2024). This makes "total cost of ownership across payment methods" a genuine, differentiated product angle. [Source: entrepreneursharks.com, investriyadh.ai]
-- Regulatory reality: the **Saudi PDPL** (Royal Decree M/19, fully enforced since Sept 2023, enforced by **SDAIA**) governs any collection/processing of personal data of Saudi residents, with fines up to SAR 5M. This has direct implications for how we store user data, how we handle scraped third-party data that may contain personal information (e.g., reviewer names), and where we host data (data residency is a live discussion topic in KSA). This is captured as a hard constraint in §12 and will be elaborated in `SECURITY.md`. [Source: sdaia.gov.sa, sgc.consulting, iapp.org]
-
-**Decision needed from founder (see §17, Q1):** none yet at this phase — this section is informational. Deeper competitive/legal diligence is recommended before Phase 3 (Infrastructure/data-residency decisions) and will be flagged again then.
+- **Fragmentation.** Prices live on separate retailer sites (Amazon.sa, Jarir, extra, Noon) with no unified view — checking "who has the best price" today means opening 4 tabs.
+- **No price memory.** A "50% OFF" badge is meaningless without knowing the real price history — was it ever actually sold near the "original" price, or is the discount fake? Nothing in the Saudi market surfaces this (unlike CamelCamelCamel/Keepa elsewhere).
+- **No informed buy/wait answer.** Even with the price today, "is now a good time to buy, or should I wait" is a judgment call with no data behind it — this tool's job is to make that judgment from actual price history, not gut feel.
 
 ---
 
-## 5. Product Principles — What This Is / Is Not
+## 3. Product Principles — What This Is / Is Not
 
 | This IS | This is NOT |
 |---|---|
-| An always-on intelligence system that thinks ahead of the user | A price-tracker the user must manually check |
-| A proactive notifier ("we found this for you") | A passive deals feed the user scrolls |
-| A multi-signal decision engine (price + coupon + cashback + reviews + social + financing) | A single-signal tool (price-only, or coupon-only) |
-| Built for continuous, incremental, prioritized data collection at scale | Built for one-time or on-demand scraping |
-| Bilingual (Arabic-first, RTL) and Saudi-context-aware from day one | An English-only tool with Arabic bolted on later |
-| Explainable — every recommendation shows its reasoning | A black-box "trust us" score |
+| A personal tool for one user (the founder) | A multi-tenant product for public users |
+| A multi-retailer price comparison, one query at a time | A 24/7 background watcher with proactive notifications |
+| Price history as a first-class feature (not just today's price) | A single-snapshot price checker |
+| An explainable buy/wait signal — every answer shows its reasoning | A black-box "trust us" score |
+| Free to run — $0 or near-$0 infra cost, no monetization | A business with a monetization strategy |
 
 ---
 
-## 6. Core Value Proposition (by audience)
+## 4. Scope & Roadmap
 
-**For shoppers:**
-> "Tell me once what you care about. I'll watch the internet for you and tell you the exact moment — and the exact reason — to buy, wait, or switch."
+### Already built
+- Live, on-demand multi-retailer search (`POST /api/track`) — Amazon.sa (browser-based) and Jarir (Constructor.io API, no browser needed) both confirmed working; extra is a known, accepted gap (Cloudflare IP-reputation block, not a selector bug — see `apps/web/src/app/api/track/route.ts`).
+- Favoriting a search result tracks it permanently (`POST /api/favorite`) — a deliberate action, not automatic.
+- Product images end-to-end (search results and tracked products).
+- Card-grid UI with search, live results, and a tracked list.
+- Scheduled per-retailer workers (`workers/*`) that keep tracked products' prices fresh and append to `price_history`.
 
-**For the business (monetization angle, elaborated §13):**
-> A high-intent, purchase-ready audience with rich behavioral and price-sensitivity data, monetizable via affiliate commissions, cashback take-rate, sponsored placement (clearly labeled), premium subscriptions, and eventually B2B market-intelligence data products for brands/retailers.
+### Active roadmap (the three things in §1, in build order)
+1. **Best-price highlighting** — when live search returns results from multiple retailers, visually mark the cheapest one instead of leaving the user to compare prices by eye.
+2. **Price history chart** (FR-17) — the data is already being collected (`price_history` table, written by the scheduled workers); needs a chart view per tracked product.
+3. **Buy-or-wait signal** (FR-9, simplified) — starts as a simple, explainable rule against the accumulated price history (e.g., current price vs. historical min/median/percentile), not an LLM agent from day one. An LLM-backed version is a possible later upgrade, not a prerequisite for shipping v1 of this.
 
----
-
-## 7. Goals & Success Metrics
-
-### 7.1 Product goals (qualitative)
-- G1: Users receive at least one genuinely useful proactive alert per week without opening the app.
-- G2: A recommendation ("buy now" / "wait") is trusted enough that users act on it — measured by click-through to retailer and, eventually, confirmed purchase via affiliate attribution.
-- G3: Coverage of the top Saudi retailers + top international retailers shipping to KSA is broad enough that "is this a good price?" almost always has an answer.
-- G4: The system requires zero manual data refresh — verified by an internal SLA (see 7.2).
-
-### 7.2 Success metrics / KPIs (initial targets — to be revisited quarterly)
-
-> **Revised 2026-07-10:** MVP is personal/limited-scale, not a public launch — targets below reflect that. Y1 targets are kept as the architecture's design ceiling (what Phase 2+ must not block), not a commitment to reach them on any particular date.
-
-| Category | Metric | MVP Target (personal scale) | Y1 Target (architecture ceiling) |
-|---|---|---|---|
-| Coverage | # tracked products | 1,000–5,000 (founder's own watchlist + a few categories) | 5M+ |
-| Coverage | # retailers/workers live | 3–4 (Amazon.sa, Noon, Jarir, extra) | 10+ retailers, 6+ social/community sources |
-| Freshness | Median price staleness for "hot" (top 5% by popularity) products | < 6 hours (cron-based, not real-time) | < 30 minutes |
-| Freshness | Median price staleness for long-tail products | < 48 hours | < 24 hours |
-| Engagement | Weekly proactive-alert open rate | n/a (single/few users — qualitative "is it useful to me") | 40%+ |
-| Monetization | Affiliate-attributed GMV | none expected (§13) | defined post-MVP |
-| Reliability | Platform uptime (user-facing) | best-effort (free/hobby-tier hosting) | 99.9% |
-| Reliability | Worker failure isolation (one worker down ⇒ others unaffected) | 100% (non-negotiable even at small scale — it's cheap to get right early) | 100% |
-| **Cost** | **Monthly infra spend during MVP** | **as close to $0 as possible; every paid service must be individually justified** | optimized cost/1,000 products, not zero |
+### Explicitly not planned (see §14 for the full cut list)
+Coupons, cashback, review synthesis, social/community monitoring, proactive notifications, standing-criteria watchlists, an admin panel, alternative-product suggestions, trend detection, and any regional expansion beyond Saudi Arabia.
 
 ---
 
-## 8. Target Users & Personas
+## 5. Functional Requirements
 
-1. **The Value Hunter (primary, MVP focus)** — Saudi resident, mobile-first, price-sensitive, shops electronics/fashion/home. Wants: "don't let me overpay," coupon + cashback stacking, BNPL total-cost clarity.
-2. **The Big-Ticket Researcher** — buying a big-item (laptop, appliance, furniture) rarely; wants deep research (price history, review synthesis, "is now a good time") condensed into one page instead of 10 browser tabs.
-3. **The Deal Enthusiast / Community Poster** — highly engaged, shares deals in WhatsApp/Telegram groups and Reddit; becomes a growth/virality channel if we make sharing effortless and give them credit/rewards.
-4. **(Later) The Brand/Retailer** — B2B consumer of aggregated, anonymized market-intelligence (pricing trends, competitor positioning) — a Phase 2+ monetization line, out of MVP scope.
+Original FR numbering preserved for cross-document traceability (`API.md`, `ARCHITECTURE.md`, `DATABASE.md`, `AI_AGENTS.md`, `UI.md`, `WORKERS.md` all cite these). Each is tagged:
 
----
+### 5.1 Data Collection
+- **FR-1** — 🔲 Cut. Continuous catalog discovery (crawl every product from a retailer without a search). Not needed — search is on-demand, not a standing catalog.
+- **FR-2** — ✅ Active. Full price history per product (source, currency, timestamp) — required for §1.4 and the buy/wait signal.
+- **FR-3** — 🔲 Cut. Automated fake-discount detection as a distinct flagged feature — folded conceptually into the buy/wait signal (FR-9) instead of being its own output.
+- **FR-4** — 🔲 Cut. Coupon ingestion/validation.
+- **FR-5** — 🔲 Cut. Cashback ingestion.
+- **FR-6** — 🔲 Cut. Review collection/structuring.
+- **FR-7** — 🔲 Cut. Social/community monitoring.
+- **FR-8** — ✅ Active. Worker independence (one retailer's worker failing must not affect another) — already true by construction (`WORKERS.md`), kept because it's free and already built.
 
-## 9. Scope & Phased Roadmap
+### 5.2 Intelligence
+- **FR-9** — ✅ Active (simplified). Buy-now-vs-wait signal with a human-readable reason, grounded in price history. No "buy the alternative" branch (that's FR-10, cut) — just buy now or wait, and why.
+- **FR-10** — 🔲 Cut. Alternative-product recommendation.
+- **FR-11** — 🔲 Cut. Coupon+cashback stacking (depends on FR-4/FR-5, both cut).
+- **FR-12** — 🔲 Cut. Review synthesis (depends on FR-6, cut).
+- **FR-13** — 🔲 Cut. Trend/demand-spike detection.
+- **FR-14** — ✅ Active, but scope changes with it. "Re-run AI analysis only on material change" still applies once FR-9 exists, so the (now much smaller) AI budget isn't wasted.
 
-This PRD scopes the **product**; the following roadmap sequences *what ships when*. Full technical phasing is `ROADMAP.md` (later deliverable); this is the product-level view.
+### 5.3 User-Facing
+- **FR-15** — 🔲 Cut as originally written (standing criteria like "any laptop under 3000 SAR"). What's kept: favoriting a specific search result to track it — already built, effectively a simpler FR-15.
+- **FR-16** — 🔲 Cut. Proactive push/email notifications.
+- **FR-17** — ✅ Active. Price history chart per product — next up, §4.
+- **FR-18** — ✅ Active. Search/browse with price as a first-class signal (already built at `apps/web/src/app/api/track/route.ts`, `apps/web/src/app/page.tsx`); "best price" highlighting (§4) extends this.
+- **FR-19** — ✅ Active, informal. Bilingual EN/AR labels already present in the UI (`apps/web/src/components/product-browser.tsx`) as a nice-to-have; full RTL-first redesign is not a priority for a single Arabic-fluent user who's also comfortable reading English UI strings.
+- **FR-20** — 🔲 Cut. Notification quiet hours (depends on FR-16, cut).
 
-### MVP (Phase A — KSA, single-country)
-- Track products from **4 launch retailers**: Amazon.sa, Noon, Jarir, extra.
-- Price history + "is this a good deal" signal per product.
-- Coupon aggregation (manual + scraped) for those 4 retailers.
-- Basic proactive notification: price-drop alert on watchlisted products.
-- Web app (Arabic/English, RTL), account creation, watchlist.
-- 3 AI agents live: Price Hunter, Deal Hunter, Notification Agent.
-- Admin panel for data QA and manual overrides.
-
-### V1 (Phase B)
-- Expand to 10+ retailers incl. Namshi, SACO, Danube, IKEA KSA, extra Salla/Zid long tail.
-- Cashback provider integration.
-- Review Analyst agent (synthesized review verdicts).
-- Price Prediction Agent (basic — "wait or buy" using historical patterns).
-- Shopping Planner (event-based: Ramadan, White Friday, back-to-school).
-- Mobile-optimized PWA / native app evaluation.
-
-### V2 (Phase C)
-- Social Intelligence Agent (X, Reddit, TikTok, YouTube signal).
-- Trend Detection Agent, Recommendation Agent (personalized, not just watchlist-based).
-- BNPL/financing comparison engine (Tabby/Tamara/credit-card installment total-cost calculator).
-- B2B intelligence product (early access).
-
-### Regional Expansion (Phase D)
-- UAE, then wider GCC — new retailers, new currencies, VAT differences, Arabic dialect tuning.
-- Multi-country price-comparison ("cheaper to import from UAE?" style insight), where legal.
-
-**Explicitly out of scope for the foreseeable roadmap** (see §14) — flagging now to prevent scope creep.
+### 5.4 Admin / Ops
+- **FR-21, FR-22, FR-23** — 🔲 Cut. No admin panel, no worker-health UI, no manual verdict overrides — the founder is the only operator and can read GitHub Actions run logs directly.
 
 ---
 
-## 10. Functional Requirements
-
-Numbered `FR-x` for future traceability into `API.md`/`AI_AGENTS.md`/`WORKERS.md`.
-
-### 10.1 Data Collection
-- **FR-1** The system must continuously discover and ingest products from each configured retailer without manual URL submission (catalog crawl + sitemap/API where available).
-- **FR-2** The system must record full price history per product (not just current price), with source, currency, and timestamp.
-- **FR-3** The system must detect and flag "fake discount" patterns (inflated reference price vs. real historical price).
-- **FR-4** The system must ingest coupon codes and validate them (mark expired/invalid codes automatically, not just on user report).
-- **FR-5** The system must ingest cashback offers per retailer/category.
-- **FR-6** The system must collect and structure reviews (retailer-native + external) per product.
-- **FR-7** The system must monitor community/social sources (Reddit, X, YouTube, TikTok) for product/deal mentions relevant to tracked categories.
-- **FR-8** Each worker (per source) must run independently; failure of one must not degrade or halt others (see §11 NFR-Reliability).
-
-### 10.2 Intelligence / AI
-- **FR-9** The system must produce a "should I buy now or wait" signal per tracked product, with a human-readable explanation.
-- **FR-10** The system must recommend alternative products when a better option exists (better price, better rating, faster delivery).
-- **FR-11** The system must surface the best available coupon+cashback combination for a given product/retailer at decision time.
-- **FR-12** The system must synthesize reviews (native + social) into a short verdict with cited pros/cons, not just an average star rating.
-- **FR-13** The system must detect trending products/categories ahead of demand spikes (e.g., pre-Ramadan appliance searches).
-- **FR-14** The system must re-run AI analysis only when underlying data materially changes (incremental, cost-aware — not on a fixed timer regardless of change).
-
-### 10.3 User-Facing
-- **FR-15** Users can create a watchlist (specific products, or standing criteria e.g. "any laptop under 3000 SAR with 16GB RAM").
-- **FR-16** Users receive proactive notifications via **push and email only at MVP** (decided 2026-07-10); WhatsApp Business API and SMS are explicit V1 candidates, not MVP scope, without needing to open the app.
-- **FR-17** Users can view full price history as a chart per product.
-- **FR-18** Users can search/browse products with price, rating, and "deal quality" as first-class filters/sort.
-- **FR-19** The UI must fully support Arabic (RTL) as a first-class, not translated-afterthought, experience — including number formatting (Arabic-Indic vs. Western numerals — configurable), currency (SAR), and date handling (Gregorian primary; Hijri-aware for shopping-event context).
-- **FR-20** Users can configure notification frequency/quiet hours to avoid alert fatigue.
-
-### 10.4 Admin / Ops
-- **FR-21** Admins can view worker health, last-successful-run, and error rates per source.
-- **FR-22** Admins can manually override/correct AI-generated verdicts (with the correction feeding back as a signal, not just a one-off patch).
-- **FR-23** Admins can pause/resume individual workers without affecting others.
-
----
-
-## 11. Non-Functional Requirements
+## 6. Non-Functional Requirements
 
 | Category | Requirement |
 |---|---|
-| **Scalability** | Architecture (Phase 2+) must support millions of tracked products and millions of users without redesign — horizontal scaling of workers/queues is mandatory, not aspirational. |
-| **Performance** | User-facing pages must be interactive in <2s on median KSA mobile network conditions. Search must return in <300ms p95. |
-| **Availability** | 99.9% uptime target for user-facing services post-V1; background collection degradation must never take down the web/API tier. |
-| **Security** | No plaintext secrets; least-privilege access between services; all user PII encrypted at rest; see `SECURITY.md` (Phase to follow). |
-| **Compliance** | Must comply with Saudi PDPL (SDAIA-enforced) for any personal data (users, and any personal data incidentally present in scraped reviews/social content — e.g., reviewer names/handles). **Decided (2026-07-10):** hosting outside KSA is acceptable for MVP, provided PDPL-compliant technical/organizational safeguards are in place (see §17 Q1 resolution) — this unblocks Phase 2/3 region selection (e.g., Supabase/Railway nearest compliant region) without requiring in-Kingdom hosting at launch. |
-| **Cost Efficiency** | Collection frequency must scale with product popularity/volatility, not run uniformly — this is a core cost lever, detailed functionally in `WORKERS.md`/scheduler design (Phase 6/7). **MVP deployment constraint (2026-07-10):** at personal/limited MVP scale, prefer the cheapest option that is genuinely good over the "best-in-class" managed option — free/hobby tiers, serverless-first, and consolidating services (e.g., one database doing relational + search + vector) over running many always-on paid services. The architecture must still remain swappable to premium/dedicated services at scale (see `ARCHITECTURE.md`), so this is a deployment choice, not a design compromise. |
-| **Maintainability** | Monorepo, typed codebase end-to-end (TypeScript), documented interfaces between agents/workers/services so any one piece can be rebuilt without touching the rest. |
-| **Auditability** | Every AI-generated recommendation must be traceable to the data it used (for debugging, for user trust, and for regulatory defensibility). |
-| **Legal/ToS risk** | Data collection from third-party sites carries ToS and legal risk (rate-limiting, robots.txt respect, no circumvention of technical access controls) — approach must be documented per-source in `WORKERS.md` and reviewed, not assumed. |
+| **Cost** | $0 or as close to it as possible — free/hobby tiers throughout (already the deployed reality: Vercel, Supabase, GitHub Actions). |
+| **Reliability** | One retailer's worker breaking must not affect the others (already true — independent GitHub Actions workflows per retailer). |
+| **Performance** | Live search should return in well under the current ~30s ceiling where possible; not a hard SLA at personal scale. |
+| **Maintainability** | Typed end-to-end (TypeScript), so the founder (with AI assistance) can keep extending it without re-learning the codebase each time. |
+
+Scale targets (millions of users, 99.9% uptime, sub-300ms search), PDPL compliance program, and security hardening beyond "don't leak secrets, use RLS" are dropped — they were sized for a public product this no longer is.
 
 ---
 
-## 12. Localization & Cultural Requirements
+## 7. Monetization
 
-- **Arabic-first, bilingual (AR/EN) from MVP** — not a post-launch translation pass. RTL layout is a core UI requirement, not a CSS afterthought.
-- **Currency:** SAR primary; multi-currency support architected from the start given regional expansion roadmap.
-- **Shopping calendar awareness:** Ramadan, Eid al-Fitr, Eid al-Adha, White Friday, Saudi National Day (Sep 23), back-to-school, 11.11/12.12 (regional carry-over from global e-commerce culture) — the Shopping Planner agent (§ AI Agents, future doc) is explicitly built around these events, not generic "holiday sale" detection.
-- **Payment-method awareness:** Mada, Apple Pay, STC Pay, and BNPL (Tabby, Tamara) must be first-class concepts in product/price data — not generic "credit card" assumptions — because total cost of ownership differs meaningfully by payment method.
+None. Single user, no ads, no affiliate links, no subscriptions, no B2B data product. This section exists only because other documents may still reference "§13" from the original draft — there is nothing to build here.
 
 ---
 
-## 13. Monetization Strategy (directional — full model deferred to a future BUSINESS.md if requested)
+## 8. Explicitly Out of Scope
 
-> **Decided (2026-07-10):** No affiliate/partner relationships with Amazon.sa, Noon, Jarir, or extra exist today (§17 Q2 resolution). MVP therefore ships with **zero live monetization** — the priority is coverage, freshness, and trust. Affiliate applications should open in parallel with MVP build (most programs require a live product to apply), and §13.1 becomes real only once approved. This also means MVP cost must be sustainable without affiliate revenue as a fallback — a constraint for Phase 3 infra sizing.
-
-1. **Affiliate commissions** from retailer partner programs on outbound purchase clicks. *(Not yet secured — apply during/after MVP build, see note above.)*
-2. **Cashback take-rate** — margin on cashback offers surfaced/brokered through the platform.
-3. **Sponsored placement** — clearly and permanently labeled as sponsored; must never be visually or algorithmically conflated with organic "best deal" ranking (trust is the core asset — this is a hard product principle, not a growth-team negotiation point).
-4. **Premium subscription** (future) — advanced alerts, unlimited watchlist criteria, deeper price-prediction.
-5. **B2B market intelligence** (future, V2+) — anonymized/aggregated pricing & demand trend data licensed to brands/retailers.
-
----
-
-## 14. Explicitly Out of Scope (for now)
-
-- Building our own checkout/payment processing (we route to retailers; we are not a marketplace).
-- Holding inventory or fulfilling orders.
-- Acting as a BNPL/lender ourselves.
-- Full non-KSA GCC support before V1 KSA metrics are healthy (§7.2).
-- Native mobile apps before PWA/web validates engagement patterns (revisit at V1).
+- Any user other than the founder; accounts, auth, or multi-tenancy.
+- Proactive notifications (push/email/WhatsApp/SMS) of any kind.
+- Coupons, cashback, BNPL/financing comparison.
+- Review collection or synthesis.
+- Social/community monitoring (Reddit/X/YouTube/TikTok).
+- Trend/demand-spike detection, a "Shopping Planner" tied to Ramadan/White Friday/etc.
+- Alternative-product recommendations.
+- An admin panel or any ops UI beyond what GitHub Actions already provides.
+- Monetization of any kind.
+- Regional expansion beyond Saudi Arabia.
+- Checkout/payments, holding inventory, acting as a lender — never in scope, kept from the original draft.
 
 ---
 
-## 15. Assumptions & Constraints
+## 9. Risks
 
-- Tech stack, deployment targets (Railway, Supabase, Vercel), and monorepo structure are **founder-specified constraints**, treated as fixed inputs to Phase 2 architecture, not re-litigated here.
-- We assume affiliate program access is obtainable for the 4 MVP retailers; **not yet verified** — flagged as a Phase-1 risk (§16) and a pre-Phase-2 action item.
-- We assume scraping of public retailer/coupon/social pages is technically and legally viable within ToS-respecting rate limits; per-source legal review is required before each worker ships (see NFR "Legal/ToS risk" and will be tracked per-worker in `WORKERS.md`).
-
----
-
-## 16. Risks & Mitigations
-
-| Risk | Impact | Mitigation |
-|---|---|---|
-| Retailers block/rate-limit scraping | Data gaps, broken core value prop | Respect robots.txt/ToS; prefer official APIs/affiliate feeds where available; graceful degradation per worker; diversify sources so no single retailer is a single point of failure |
-| PDPL non-compliance | Fines up to SAR 5M, reputational damage | Legal review before storing any personal data; data-minimization by default; explicit consent flows; data residency decision made deliberately (§17) |
-| AI recommendations erode trust if wrong | User churn | Explainability by design (FR-9, FR-12); confidence scoring; human override path (FR-22); never overstate certainty |
-| Sponsored content perceived as biased | Trust collapse (core asset) | Hard separation of organic ranking vs. sponsored, enforced architecturally, not just by policy |
-| Cost blow-up from naive "crawl everything equally" | Unsustainable unit economics | Smart, popularity/volatility-weighted scheduler (Phase 6/7) — foundational, not an optimization to defer |
-| Single point of failure in workers/agents | Platform-wide outage from one bad source | Independent worker processes, circuit breakers, isolated failure domains (NFR-Reliability, FR-8) |
+| Risk | Mitigation |
+|---|---|
+| Retailers block scraping (already true for extra) | Accept the gap where it isn't worth chasing (documented in `apps/web/src/app/api/track/route.ts`); fail safely, never fabricate results. |
+| Buy/wait signal is wrong and misleads the one user who relies on it | Keep it explainable (show the actual history/reasoning, not just a verdict) so it's easy to sanity-check, not blindly trusted. |
 
 ---
 
-## 17. Open Questions — Decisions Needed Before Phase 2
+## 10. Next Steps
 
-Founder decisions recorded 2026-07-10:
-
-1. **Data residency — RESOLVED.** Hosting outside KSA is acceptable for MVP, provided PDPL-compliant technical/organizational safeguards are implemented (encryption, access controls, documented lawful basis, breach process). No in-Kingdom hosting requirement at launch. Applied in §11 (Compliance row). Data-residency posture should be revisited if/when regional expansion (§9 Phase D) or enterprise/government customers (§13.5 B2B) raise the bar.
-2. **Affiliate program access — RESOLVED.** No affiliate/partner relationships with Amazon.sa, Noon, Jarir, or extra exist today. MVP ships with no live affiliate monetization; applications open in parallel with/after MVP build. Applied in §13. Phase 3 infra-cost planning must assume **zero affiliate revenue** as the baseline case, not a fallback.
-3. **MVP notification channel — RESOLVED.** Push + email only for MVP. WhatsApp Business API and SMS are explicit, scoped V1 candidates (not deferred indefinitely — flag for `ROADMAP.md`). Applied in §10.3 (FR-16).
-4. **Success metric ownership — RESOLVED (2026-07-10, revised).** MVP usage is **personal/limited scale, not public-launch scale** — founder is cost-sensitive and wants the cheapest option that is still genuinely good, not the "best-in-class" managed option. §7.2 MVP-column targets are revised down accordingly (see updated table). The **Y1 targets and the underlying architecture remain unchanged** — the system must still be *designed* to scale to millions of products/users without a rewrite; we are only choosing a minimal-cost *deployment* of that same architecture for MVP (e.g., free/hobby tiers, serverless-first, fewer always-on services). This directly shapes Phase 2's infrastructure choices (see `ARCHITECTURE.md`, cost section).
-5. **Monorepo/tech-stack constraints — RESOLVED.** Treated as the default direction, not a locked mandate: Phase 2 may propose a concretely better alternative for any component, provided it is explicitly compared and justified in `ARCHITECTURE.md` rather than swapped silently. Applied in the governance note at the top of this document.
-
-**Status:** All five open questions are now resolved. Phase 2 (`ARCHITECTURE.md`) may now proceed.
-
----
-
-## 18. Glossary
-
-- **Deal Hunter / Price Hunter / Coupon Hunter / Cashback Hunter** — specialized AI agents (fully designed in Phase 5 `AI_AGENTS.md`).
-- **Worker** — an independent process responsible for collecting data from exactly one external source (Phase 6 `WORKERS.md`).
-- **Watchlist** — user-defined product or criteria the platform actively monitors on the user's behalf.
-- **Deal quality** — a computed signal (not raw discount %) reflecting genuine price-history-based savings.
-- **White Friday** — the MENA-region equivalent/adaptation of Black Friday, a top-priority Shopping Planner event.
-
----
-
-## 19. Next Steps
-
-1. Founder review of this PRD — approve, or annotate changes.
-2. Answer Open Questions (§17), at minimum Q1, Q2, Q5.
-3. Upon approval → **Phase 2: `ARCHITECTURE.md`** (system architecture: services, event flow, agent/worker/scheduler interaction at a component level — no infra sizing yet, that's Phase 3).
-
----
-
-### Sources referenced in §4
-- [Saudi Arabia E-commerce Market Size & Forecast — IMARC Group](https://www.imarcgroup.com/saudi-arabia-e-commerce-market)
-- [eCommerce Saudi Arabia — Statista Market Forecast](https://www.statista.com/outlook/emo/ecommerce/saudi-arabia/)
-- [Saudi Arabia E-commerce Market Size & Outlook — Grand View Research](https://www.grandviewresearch.com/horizon/outlook/e-commerce-market/saudi-arabia)
-- [Saudi Arabia E-commerce Market — Mordor Intelligence](https://www.mordorintelligence.com/industry-reports/saudi-arabia-ecommerce-market)
-- [SDAIA and Saudi PDPL Compliance Guide 2026](https://www.sgc.consulting/sdaia-saudi-personal-data-protection-law-pdpl-compliance-guide/)
-- [Saudi PDPL first anniversary — IAPP](https://iapp.org/news/a/saudi-pdpl-s-first-anniversary-amendments-enforcement-and-ongoing-developments)
-- [Tamara & Tabby: The BNPL Battle Reshaping Saudi Shopping](https://www.entrepreneursharks.com/tamara-tabby-the-bnpl-battle-reshaping-saudi-shopping/)
-- [Tabby — Saudi Arabia's Digital Payments Future](https://investriyadh.ai/entities/tabby/)
+1. Add best-price highlighting to live search results (§4, item 1).
+2. Build the price history chart view (FR-17).
+3. Ship a first, simple, rule-based buy/wait signal (FR-9) against existing `price_history` data.
