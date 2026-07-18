@@ -1,0 +1,60 @@
+name: Smoke test favorite grouping + delete
+on:
+  workflow_dispatch:
+
+jobs:
+  smoke-test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: POST /api/favorite with a groupKey
+        id: post
+        run: |
+          set -e
+          UNIQUE="smoke-test-$(date +%s)"
+          BODY=$(curl -sS -X POST "https://ai-shopping-intelligence-seven.vercel.app/api/favorite" \
+            -H "Content-Type: application/json" \
+            -d "{\"retailerSlug\":\"jarir\",\"url\":\"https://www.jarir.com/sa-en/${UNIQUE}.html\",\"title\":\"Smoke Test Product ${UNIQUE}\",\"price\":123.45,\"currency\":\"SAR\",\"imageUrl\":null,\"groupKey\":\"smoke test group\"}")
+          echo "Response: $BODY"
+          echo "body=$BODY" >> "$GITHUB_OUTPUT"
+          PRODUCT_ID=$(echo "$BODY" | node -e "let d='';process.stdin.on('data',c=>d+=c);process.stdin.on('end',()=>{const j=JSON.parse(d);if(!j.product||!j.product.id)throw new Error('no product.id in response: '+d);console.log(j.product.id);});")
+          echo "product_id=$PRODUCT_ID" >> "$GITHUB_OUTPUT"
+          GROUP_KEY=$(echo "$BODY" | node -e "let d='';process.stdin.on('data',c=>d+=c);process.stdin.on('end',()=>{const j=JSON.parse(d);console.log((j.product.specs&&j.product.specs.group_key)||'MISSING');});")
+          echo "Stored group_key: $GROUP_KEY"
+          if [ "$GROUP_KEY" != "smoke test group" ]; then
+            echo "::error::group_key was not persisted correctly (got: $GROUP_KEY)"
+            exit 1
+          fi
+          echo "PASS: group_key persisted correctly"
+
+      - name: DELETE the test product
+        run: |
+          set -e
+          PRODUCT_ID="${{ steps.post.outputs.product_id }}"
+          echo "Deleting product_id=$PRODUCT_ID"
+          HTTP_CODE=$(curl -sS -o /tmp/delete_resp.json -w "%{http_code}" -X DELETE "https://ai-shopping-intelligence-seven.vercel.app/api/favorite?productId=${PRODUCT_ID}")
+          echo "HTTP status: $HTTP_CODE"
+          cat /tmp/delete_resp.json
+          echo ""
+          if [ "$HTTP_CODE" != "200" ]; then
+            echo "::error::DELETE did not return 200"
+            exit 1
+          fi
+          OK=$(node -e "const j=require('/tmp/delete_resp.json');console.log(j.ok===true?'true':'false');")
+          if [ "$OK" != "true" ]; then
+            echo "::error::DELETE response did not confirm ok:true"
+            exit 1
+          fi
+          echo "PASS: delete succeeded"
+
+      - name: Confirm the product is actually gone (search should not find it)
+        run: |
+          set -e
+          PRODUCT_ID="${{ steps.post.outputs.product_id }}"
+          RESP=$(curl -sS "https://ai-shopping-intelligence-seven.vercel.app/api/search?q=Smoke%20Test%20Product")
+          echo "Search response: $RESP"
+          FOUND=$(echo "$RESP" | node -e "let d='';process.stdin.on('data',c=>d+=c);process.stdin.on('end',()=>{const j=JSON.parse(d);const found=(j.products||[]).some(p=>p.id==='${PRODUCT_ID}');console.log(found?'true':'false');});")
+          if [ "$FOUND" == "true" ]; then
+            echo "::error::deleted product still appears in search results"
+            exit 1
+          fi
+          echo "PASS: deleted product no longer appears"
