@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import type { Product, Retailer } from "@repo/database";
-import { groupProducts } from "@/lib/product-groups";
+import { findMatchingGroupKey, groupProducts } from "@/lib/product-groups";
 
 interface LiveResult {
   retailerSlug: string;
@@ -398,19 +398,29 @@ export function ProductBrowser({
   // Tracks every retailer currently shown for this product at once, not one
   // at a time -- founder feedback (2026-07-18): "it's supposed to be
   // search -- if I favorite it, it favorites the product; the retailer is
-  // just where to buy it." All share the same group_key (the normalized
-  // query), so they land as one grouped card.
+  // just where to buy it."
+  //
+  // Each result's group_key is resolved independently: first, check whether
+  // its title actually matches something already tracked (findMatchingGroupKey
+  // -- founder feedback, same day: "اكيد ينباع المنتج في اكثر من مكان...
+  // لازم تصنف بذكائك حسب المواصفات," a product surely sells in more than one
+  // place, classify it smartly by spec) so favoriting it from a *different*
+  // search than the one that first tracked it still lands in the same group.
+  // Only falls back to the normalized-query key when nothing existing
+  // matches, which is also what keeps multiple genuinely-new results from
+  // this same search grouped with each other.
   function favoriteAll(results: LiveResult[]) {
-    const groupKey = query.trim().toLowerCase().replace(/\s+/g, " ");
+    const fallbackGroupKey = query.trim().toLowerCase().replace(/\s+/g, " ");
     setLiveFavoriteStatus("saving");
     Promise.all(
-      results.map((result) =>
-        fetch("/api/favorite", {
+      results.map((result) => {
+        const groupKey = findMatchingGroupKey(result.title, products) ?? fallbackGroupKey;
+        return fetch("/api/favorite", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ ...result, groupKey }),
-        }).then((res) => res.json() as Promise<{ product?: Product; error?: string }>),
-      ),
+        }).then((res) => res.json() as Promise<{ product?: Product; error?: string }>);
+      }),
     )
       .then((responses) => {
         const succeeded = responses.filter((r): r is { product: Product } => !!r.product);
