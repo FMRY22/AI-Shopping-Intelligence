@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import type { Product } from "@repo/database";
+import { PriceHistoryModal } from "@/components/price-history-chart";
 
 interface LiveResult {
   retailerSlug: string;
@@ -180,27 +181,48 @@ function FavoriteButton({
   );
 }
 
-function TrackedProductCard({ product }: { product: Product }) {
+// A small chart-icon button over the image, mirroring FavoriteButton's
+// sibling-of-<a> placement (§ above) -- opens the price history modal
+// (PRD.md FR-17) without competing with the card's own link to the
+// retailer. Restructured from a single whole-card <a> (image-only <a> +
+// separate title <a>, like LiveResultCard) specifically so this button
+// isn't nested inside an anchor, which is invalid HTML and would need
+// preventDefault/stopPropagation gymnastics to behave.
+function HistoryButton({ onClick }: { onClick: () => void }) {
   return (
-    <a
-      href={product.url}
-      target="_blank"
-      rel="noreferrer"
-      className="group flex flex-col overflow-hidden rounded-2xl border border-gray-100 bg-white p-3 shadow-sm transition hover:-translate-y-1 hover:shadow-lg dark:border-white/10 dark:bg-white/[0.03]"
+    <button
+      type="button"
+      onClick={onClick}
+      aria-label="Price history"
+      className="absolute right-2 top-2 flex h-8 w-8 items-center justify-center rounded-full bg-white/90 text-gray-700 shadow-md backdrop-blur-sm transition hover:bg-white hover:text-indigo-600 dark:bg-white/15 dark:text-white dark:hover:bg-white/25"
     >
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="h-4 w-4">
+        <path d="M3 3v16a2 2 0 0 0 2 2h16" />
+        <path d="m7 14 4-4 3 3 5-6" />
+      </svg>
+    </button>
+  );
+}
+
+function TrackedProductCard({ product, onShowHistory }: { product: Product; onShowHistory: () => void }) {
+  return (
+    <div className="flex flex-col overflow-hidden rounded-2xl border border-gray-100 bg-white p-3 shadow-sm transition hover:-translate-y-1 hover:shadow-lg dark:border-white/10 dark:bg-white/[0.03]">
       <div className="relative">
-        <ProductImage src={product.image_url} alt={product.title_en} />
+        <a href={product.url} target="_blank" rel="noreferrer" className="block">
+          <ProductImage src={product.image_url} alt={product.title_en} />
+        </a>
         <StockPill inStock={product.in_stock} />
+        <HistoryButton onClick={onShowHistory} />
       </div>
-      <div className="mt-3 flex flex-1 flex-col gap-2">
-        <p className="line-clamp-2 min-h-[2.5rem] text-sm font-medium text-gray-900 group-hover:text-indigo-600 dark:text-white dark:group-hover:text-indigo-300">
+      <a href={product.url} target="_blank" rel="noreferrer" className="group">
+        <p className="mt-3 line-clamp-2 min-h-[2.5rem] text-sm font-medium text-gray-900 group-hover:text-indigo-600 dark:text-white dark:group-hover:text-indigo-300">
           {product.title_en}
         </p>
-        <div className="mt-auto">
-          <PriceTag price={product.current_price} currency={product.currency} />
-        </div>
+      </a>
+      <div className="mt-2">
+        <PriceTag price={product.current_price} currency={product.currency} />
       </div>
-    </a>
+    </div>
   );
 }
 
@@ -276,6 +298,7 @@ export function ProductBrowser({ initialProducts }: { initialProducts: Product[]
   const [trackError, setTrackError] = useState<string | null>(null);
   const [liveResults, setLiveResults] = useState<LiveResult[]>([]);
   const [favoriteStatus, setFavoriteStatus] = useState<Record<string, "idle" | "saving" | "saved" | "error">>({});
+  const [historyProduct, setHistoryProduct] = useState<{ id: string; title: string; currency: string } | null>(null);
 
   useEffect(() => {
     const trimmed = query.trim();
@@ -421,10 +444,25 @@ export function ProductBrowser({ initialProducts }: { initialProducts: Product[]
         {products.length > 0 && <SectionLabel>Tracked / متابَع</SectionLabel>}
         <div className="mt-4 grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
           {products.map((product) => (
-            <TrackedProductCard key={product.id} product={product} />
+            <TrackedProductCard
+              key={product.id}
+              product={product}
+              onShowHistory={() =>
+                setHistoryProduct({ id: product.id, title: product.title_en, currency: product.currency })
+              }
+            />
           ))}
         </div>
       </div>
+
+      {historyProduct && (
+        <PriceHistoryModal
+          productId={historyProduct.id}
+          title={historyProduct.title}
+          currency={historyProduct.currency}
+          onClose={() => setHistoryProduct(null)}
+        />
+      )}
     </div>
   );
 }
