@@ -82,10 +82,18 @@ function ProductImage({ src, alt }: { src: string | null; alt: string }) {
   );
 }
 
-function PriceTag({ price, currency }: { price: number | null; currency: string }) {
+function PriceTag({
+  price,
+  currency,
+  highlight,
+}: {
+  price: number | null;
+  currency: string;
+  highlight?: boolean;
+}) {
   if (price == null) return <span className="text-sm text-gray-400 dark:text-white/40">—</span>;
   return (
-    <span className="text-lg font-bold text-gray-900 dark:text-white">
+    <span className={`text-lg font-bold ${highlight ? "text-emerald-600 dark:text-emerald-400" : "text-gray-900 dark:text-white"}`}>
       {price.toLocaleString()} <span className="text-xs font-medium text-gray-400 dark:text-white/40">{currency}</span>
     </span>
   );
@@ -95,6 +103,19 @@ function RetailerBadge({ slug }: { slug: string }) {
   return (
     <span className="inline-flex items-center rounded-full bg-indigo-50 px-2.5 py-0.5 text-[11px] font-semibold text-indigo-600 dark:bg-indigo-500/10 dark:text-indigo-300">
       {retailerLabel(slug)}
+    </span>
+  );
+}
+
+// Marks the cheapest of the current live results, so "where's the best
+// price" (PRD.md §1, item 3) is a glance instead of eyeballing every card's
+// price -- only shown when there's more than one retailer to compare
+// against (see ProductBrowser), since with a single result "best" is
+// trivially true and just noise.
+function BestPricePill() {
+  return (
+    <span className="absolute left-2 top-2 rounded-full bg-emerald-500/90 px-2 py-0.5 text-[10px] font-bold text-white shadow-sm backdrop-blur-sm">
+      Best price
     </span>
   );
 }
@@ -187,17 +208,24 @@ function LiveResultCard({
   result,
   onFavorite,
   status,
+  isBestPrice,
 }: {
   result: LiveResult;
   onFavorite: () => void;
   status: "idle" | "saving" | "saved" | "error";
+  isBestPrice: boolean;
 }) {
   return (
-    <div className="flex flex-col overflow-hidden rounded-2xl border border-gray-100 bg-white p-3 shadow-sm transition hover:shadow-lg dark:border-white/10 dark:bg-white/[0.03]">
+    <div
+      className={`flex flex-col overflow-hidden rounded-2xl border bg-white p-3 shadow-sm transition hover:shadow-lg dark:bg-white/[0.03] ${
+        isBestPrice ? "border-emerald-400 dark:border-emerald-500/60" : "border-gray-100 dark:border-white/10"
+      }`}
+    >
       <div className="relative">
         <a href={result.url} target="_blank" rel="noreferrer" className="block">
           <ProductImage src={result.imageUrl} alt={result.title} />
         </a>
+        {isBestPrice && <BestPricePill />}
         <FavoriteButton status={status} onClick={onFavorite} />
       </div>
       <a href={result.url} target="_blank" rel="noreferrer" className="group">
@@ -207,7 +235,7 @@ function LiveResultCard({
       </a>
       <div className="mt-2 flex items-center justify-between gap-2">
         <RetailerBadge slug={result.retailerSlug} />
-        <PriceTag price={result.price} currency={result.currency} />
+        <PriceTag price={result.price} currency={result.currency} highlight={isBestPrice} />
       </div>
     </div>
   );
@@ -319,6 +347,8 @@ export function ProductBrowser({ initialProducts }: { initialProducts: Product[]
       .catch(() => setFavoriteStatus((prev) => ({ ...prev, [result.url]: "error" })));
   }
 
+  const lowestLivePrice = liveResults.length > 0 ? Math.min(...liveResults.map((r) => r.price)) : null;
+
   return (
     <div>
       <p className="mb-4 text-sm text-gray-500 dark:text-white/40">
@@ -380,6 +410,7 @@ export function ProductBrowser({ initialProducts }: { initialProducts: Product[]
                 result={result}
                 status={favoriteStatus[result.url] ?? "idle"}
                 onFavorite={() => favorite(result)}
+                isBestPrice={liveResults.length > 1 && result.price === lowestLivePrice}
               />
             ))}
           </div>
