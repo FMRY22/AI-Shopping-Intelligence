@@ -112,19 +112,6 @@ function RetailerBadge({ slug }: { slug: string }) {
   );
 }
 
-// Marks the cheapest of the current live results, so "where's the best
-// price" (PRD.md §1, item 3) is a glance instead of eyeballing every card's
-// price -- only shown when there's more than one retailer to compare
-// against (see ProductBrowser), since with a single result "best" is
-// trivially true and just noise.
-function BestPricePill() {
-  return (
-    <span className="absolute left-2 top-2 rounded-full bg-emerald-500/90 px-2 py-0.5 text-[10px] font-bold text-white shadow-sm backdrop-blur-sm">
-      Best price
-    </span>
-  );
-}
-
 function StockPill({ inStock }: { inStock: boolean }) {
   return (
     <span
@@ -139,57 +126,13 @@ function StockPill({ inStock }: { inStock: boolean }) {
   );
 }
 
-// A floating circular button over the product photo, not a full-width bar
-// below it -- founder feedback (2026-07-17, twice: "still looks primitive",
-// wants it closer to a polished consumer app like Blink) pointed at flat,
-// text-heavy cards as the culprit. Sits as a sibling of the <a> (not
-// nested inside it) so clicking it doesn't also trigger the product-page
-// navigation.
-function FavoriteButton({
-  status,
-  onClick,
-}: {
-  status: "idle" | "saving" | "saved" | "error";
-  onClick: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      disabled={status === "saving" || status === "saved"}
-      aria-label="Favorite"
-      className={`absolute right-2 top-2 flex h-8 w-8 items-center justify-center rounded-full shadow-md backdrop-blur-sm transition disabled:cursor-default ${
-        status === "saved"
-          ? "bg-indigo-600 text-white"
-          : status === "error"
-            ? "bg-red-500 text-white"
-            : "bg-white/90 text-gray-700 hover:bg-white hover:text-indigo-600 dark:bg-white/15 dark:text-white dark:hover:bg-white/25"
-      }`}
-    >
-      {status === "saving" ? (
-        <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-current border-t-transparent" />
-      ) : status === "saved" ? (
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} className="h-4 w-4">
-          <path d="M20 6 9 17l-5-5" />
-        </svg>
-      ) : status === "error" ? (
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} className="h-4 w-4">
-          <path d="M12 5v9M12 18v.01" />
-        </svg>
-      ) : (
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="h-4 w-4">
-          <path d="M12 17.3 6.2 21l1.5-6.6L2.5 9.9l6.7-.6L12 3l2.8 6.3 6.7.6-5.2 4.5 1.5 6.6z" />
-        </svg>
-      )}
-    </button>
-  );
-}
-
-// Small ghost icon button for an inline retailer row (chart / remove) --
-// distinct from FavoriteButton's floating-over-the-image style, which only
-// made sense with exactly one action per card. A grouped card (below) has
-// one row per retailer, each with its own actions, so the actions live in
-// the row instead of overlaid on a single shared image.
+// Small ghost icon button for an inline retailer row (chart / remove /
+// favorite) -- live search results and tracked products both render as one
+// grouped card with a row per retailer (founder feedback, 2026-07-18: "I
+// search, click the product, see everywhere it's sold and each price" --
+// showing that comparison is the point, not a secondary detail per flat
+// card), so every row-level action lives inline instead of overlaid on a
+// shared image the way a single-action card could get away with before.
 function RowIconButton({
   onClick,
   label,
@@ -225,6 +168,49 @@ function TrashIcon() {
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="h-4 w-4">
       <path d="M4 7h16M9 7V5a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2m3 0-1 13a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 7h14Z" />
     </svg>
+  );
+}
+
+// Row-scale favorite action for a live-result row -- same state machine as
+// the old floating FavoriteButton, just sized/styled to sit next to
+// RowIconButton instead of overlaid on the image.
+function RowFavoriteButton({
+  status,
+  onClick,
+}: {
+  status: "idle" | "saving" | "saved" | "error";
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={status === "saving" || status === "saved"}
+      aria-label="Favorite"
+      className={`flex h-7 w-7 items-center justify-center rounded-full transition disabled:cursor-default ${
+        status === "saved"
+          ? "bg-indigo-600 text-white"
+          : status === "error"
+            ? "bg-red-500 text-white"
+            : "text-gray-400 hover:bg-gray-100 hover:text-indigo-600 dark:text-white/40 dark:hover:bg-white/10 dark:hover:text-white"
+      }`}
+    >
+      {status === "saving" ? (
+        <span className="h-3 w-3 animate-spin rounded-full border-2 border-current border-t-transparent" />
+      ) : status === "saved" ? (
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} className="h-3.5 w-3.5">
+          <path d="M20 6 9 17l-5-5" />
+        </svg>
+      ) : status === "error" ? (
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} className="h-3.5 w-3.5">
+          <path d="M12 5v9M12 18v.01" />
+        </svg>
+      ) : (
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="h-3.5 w-3.5">
+          <path d="M12 17.3 6.2 21l1.5-6.6L2.5 9.9l6.7-.6L12 3l2.8 6.3 6.7.6-5.2 4.5 1.5 6.6z" />
+        </svg>
+      )}
+    </button>
   );
 }
 
@@ -288,38 +274,61 @@ function TrackedProductGroupCard({
   );
 }
 
-function LiveResultCard({
-  result,
+// Every retailer's hit for one search is one product being compared, not N
+// unrelated cards -- founder feedback (2026-07-18): "I search, click the
+// product, [want to] see everywhere it's sold and each price." `results`
+// must already be sorted cheapest-first by the caller (same convention as
+// TrackedProductGroupCard's `items`). A row only gets a history icon once
+// it's actually tracked (`trackedByUrl` match) -- price history only starts
+// accumulating from the moment of favoriting, so showing the icon earlier
+// would open a chart with nothing in it.
+function LiveResultGroupCard({
+  results,
+  favoriteStatus,
   onFavorite,
-  status,
-  isBestPrice,
+  trackedByUrl,
+  onShowHistory,
 }: {
-  result: LiveResult;
-  onFavorite: () => void;
-  status: "idle" | "saving" | "saved" | "error";
-  isBestPrice: boolean;
+  results: LiveResult[];
+  favoriteStatus: Record<string, "idle" | "saving" | "saved" | "error">;
+  onFavorite: (result: LiveResult) => void;
+  trackedByUrl: Record<string, Product>;
+  onShowHistory: (product: Product) => void;
 }) {
+  const hero = results[0]!;
+  const cheapestPrice = Math.min(...results.map((r) => r.price));
+
   return (
-    <div
-      className={`flex flex-col overflow-hidden rounded-2xl border bg-white p-3 shadow-sm transition hover:shadow-lg dark:bg-white/[0.03] ${
-        isBestPrice ? "border-emerald-400 dark:border-emerald-500/60" : "border-gray-100 dark:border-white/10"
-      }`}
-    >
-      <div className="relative">
-        <a href={result.url} target="_blank" rel="noreferrer" className="block">
-          <ProductImage src={result.imageUrl} alt={result.title} />
-        </a>
-        {isBestPrice && <BestPricePill />}
-        <FavoriteButton status={status} onClick={onFavorite} />
-      </div>
-      <a href={result.url} target="_blank" rel="noreferrer" className="group">
-        <p className="mt-3 line-clamp-2 min-h-[2.5rem] text-sm font-medium text-gray-900 group-hover:text-indigo-600 dark:text-white dark:group-hover:text-indigo-300">
-          {result.title}
-        </p>
+    <div className="flex flex-col overflow-hidden rounded-2xl border border-gray-100 bg-white p-3 shadow-sm transition hover:-translate-y-1 hover:shadow-lg dark:border-white/10 dark:bg-white/[0.03]">
+      <a href={hero.url} target="_blank" rel="noreferrer" className="block">
+        <ProductImage src={hero.imageUrl} alt={hero.title} />
       </a>
-      <div className="mt-2 flex items-center justify-between gap-2">
-        <RetailerBadge slug={result.retailerSlug} />
-        <PriceTag price={result.price} currency={result.currency} highlight={isBestPrice} />
+      <p className="mt-3 line-clamp-2 min-h-[2.5rem] text-sm font-medium text-gray-900 dark:text-white">{hero.title}</p>
+      <div className="mt-2 flex flex-col divide-y divide-gray-50 dark:divide-white/5">
+        {results.map((result) => {
+          const tracked = trackedByUrl[result.url];
+          // Already-tracked rows (from a previous session, or just favorited
+          // in this one) always read as "saved" -- favoriteStatus only knows
+          // about actions taken in the current session, but trackedByUrl is
+          // the actual source of truth for whether it's being followed.
+          const status = tracked ? "saved" : (favoriteStatus[result.url] ?? "idle");
+          return (
+            <div key={`${result.retailerSlug}:${result.url}`} className="flex items-center justify-between gap-2 py-1.5 first:pt-0 last:pb-0">
+              <a href={result.url} target="_blank" rel="noreferrer" className="flex min-w-0 items-center gap-2">
+                <RetailerBadge slug={result.retailerSlug} />
+                <PriceTag price={result.price} currency={result.currency} highlight={result.price === cheapestPrice} small />
+              </a>
+              <div className="flex shrink-0 items-center gap-0.5">
+                {tracked && (
+                  <RowIconButton onClick={() => onShowHistory(tracked)} label="Price history">
+                    <HistoryIcon />
+                  </RowIconButton>
+                )}
+                <RowFavoriteButton status={status} onClick={() => onFavorite(result)} />
+              </div>
+            </div>
+          );
+        })}
       </div>
     </div>
   );
@@ -462,7 +471,14 @@ export function ProductBrowser({
       .catch((err: unknown) => console.error(err));
   }
 
-  const lowestLivePrice = liveResults.length > 0 ? Math.min(...liveResults.map((r) => r.price)) : null;
+  // Lets a live-result row show a history icon the moment it's tracked,
+  // without a page reload -- favorite() already prepends the new row to
+  // `products`, so this just needs to stay in sync with that.
+  const trackedByUrl = useMemo(() => {
+    const map: Record<string, Product> = {};
+    for (const p of products) map[p.url] = p;
+    return map;
+  }, [products]);
 
   // Groups favorited items by the search they were favorited from (see
   // `favorite()`), falling back to the product's own id so anything without
@@ -539,15 +555,15 @@ export function ProductBrowser({
         <div className="mt-8">
           <SectionLabel>Live results — tap Favorite to track / نتائج حية — اضغط تفضيل للمتابعة</SectionLabel>
           <div className="mt-4 grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
-            {liveResults.map((result) => (
-              <LiveResultCard
-                key={`${result.retailerSlug}:${result.url}`}
-                result={result}
-                status={favoriteStatus[result.url] ?? "idle"}
-                onFavorite={() => favorite(result)}
-                isBestPrice={liveResults.length > 1 && result.price === lowestLivePrice}
-              />
-            ))}
+            <LiveResultGroupCard
+              results={[...liveResults].sort((a, b) => a.price - b.price)}
+              favoriteStatus={favoriteStatus}
+              onFavorite={favorite}
+              trackedByUrl={trackedByUrl}
+              onShowHistory={(product) =>
+                setHistoryProduct({ id: product.id, title: product.title_en, currency: product.currency })
+              }
+            />
           </div>
         </div>
       )}
