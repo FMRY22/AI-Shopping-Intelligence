@@ -39,26 +39,51 @@ export function groupProducts(products: Product[]): ProductGroup[] {
 //
 // Retailers don't share a barcode/SKU in this schema (0001_init.sql has no
 // such column), so title-token overlap is the practical signal available.
-// Jaccard similarity alone is unsafe: terse/generic retailer titles ("Apple
-// MacBook Air M2 256GB Midnight") only share ~45% of tokens with a fuller
-// title for the exact same SKU, while two genuinely different variants
-// ("...256GB" vs "...512GB", "S24" vs "S24 Ultra") can share 70-80% of
-// tokens. So the threshold alone can't carry precision -- it's paired with
-// explicit conflict vetoes below (size, model-code suffix, tier, and
-// keyword-group mismatches) that catch the specific ways "almost the same
-// title" still means "different product," checked BEFORE the jaccard
-// threshold so a high score can't override a known conflict.
-const TITLE_MATCH_THRESHOLD = 0.45;
+//
+// Round 2 (2026-07-18, same day): the founder pointed at a live example --
+// "Sony PlayStation 5 Slim (DIG) 825 GB SSD..." (Jarir) and "PS5, Digital
+// Edition 825GB - eXtra" (extra), both 2,529 SAR, still showing as separate
+// cards. Root cause was jaccard's union-based denominator: a short, terse
+// title ("PS5, Digital Edition 825GB") is a near-total subset of a long,
+// marketing-heavy one ("PlayStation 5 Slim Digital Edition Console, 825 GB,
+// (KSA Version), 2 Year Manufacturer Warranty"), but jaccard still divides
+// by the union, so the long title's extra words alone can sink the score
+// even when every one of the short title's words is present in the long
+// one. Switched to the overlap coefficient (intersection / smaller set
+// size) to fix that, plus normalized "PlayStation 5"/"PS5" and "825 GB"/
+// "825GB" to the same tokens so they can overlap at all. But overlap is
+// more permissive by construction -- it'll happily score two DIFFERENT
+// same-brand products high too ("Galaxy Buds" vs "Galaxy Watch" share
+// "samsung"+"galaxy" and little else to disagree on) -- so two more vetoes
+// were added below (distinguishing product-category words, and bare
+// unit-less generation numbers like "iPhone 15" vs "14") to keep that
+// precision intact. Every veto still runs BEFORE the similarity threshold,
+// so a high score can never override a known conflict.
+const OVERLAP_THRESHOLD = 0.5;
+
+// Canonicalizes retailer-specific abbreviations to a shared spelling before
+// tokenizing, so e.g. "PlayStation 5" (verbose retailers) and "PS5"
+// (terse ones) produce the same token instead of two disjoint ones.
+const ALIAS_PATTERNS: [RegExp, string][] = [[/playstation\s*(\d)/g, "ps$1"]];
 
 // "Wi-Fi" vs "WiFi", "13-inch" vs "13 inch" -- retailers are inconsistent
 // about hyphens within a single logical word, so hyphens are joined (not
 // turned into a space break) before tokenizing, which also has the useful
 // side effect of turning model codes like "WH-1000XM5" into one token
 // ("wh1000xm5") that the trailing-digit conflict check below can compare.
-const TOKEN_SYNONYMS: Record<string, string> = { generation: "gen" };
+const TOKEN_SYNONYMS: Record<string, string> = { generation: "gen", dig: "digital" };
+
+function preprocessTitle(title: string): string {
+  let normalized = title.toLowerCase();
+  for (const [pattern, replacement] of ALIAS_PATTERNS) normalized = normalized.replace(pattern, replacement);
+  // "825 GB" -> "825gb", matching however extractSizeByUnit already reads it,
+  // so the tokenizer doesn't split what the size-conflict check treats as one value.
+  normalized = normalized.replace(/(\d)\s+(gb|tb|mp|mah|inch)\b/g, "$1$2");
+  return normalized.replace(/-/g, "");
+}
 
 function normalizeTitleTokens(title: string): Set<string> {
-  const joined = title.toLowerCase().replace(/-/g, "");
+  const joined = preprocessTitle(title);
   return new Set(
     joined
       .replace(/[^\p{L}\p{N}\s]/gu, " ")
@@ -74,8 +99,7 @@ export function titleSimilarity(a: string, b: string): number {
   if (setA.size === 0 || setB.size === 0) return 0;
   let intersection = 0;
   for (const token of setA) if (setB.has(token)) intersection++;
-  const union = setA.size + setB.size - intersection;
-  return intersection / union;
+  return intersection / Math.min(setA.size, setB.size);
 }
 
 // Storage/capacity variants ("256GB" vs "512GB") share nearly every other
@@ -136,13 +160,42 @@ function hasConflictingModelCode(tokensA: Set<string>, tokensB: Set<string>): bo
 
 // Tier words ("Pro", "Ultra", "Max", ...) mark a different, usually
 // differently-priced product line within the same family (e.g. "Galaxy
-// S24" vs "Galaxy S24 Ultra"). Flags a conflict when a tier word appears in
-// exactly one of the two titles -- both titles naming the same tier (or
-// neither naming one) isn't a conflict.
-const TIER_WORDS = ["pro", "ultra", "plus", "max", "mini", "lite", "se", "air", "note"];
+// S24" vs "Galaxy S24 Ultra"). Product-category nouns ("Buds" vs "Watch")
+// catch the overlap-coefficient false-positive described above -- two
+// different products in the same brand/line. Both use the same rule: a
+// conflict if the word appears in exactly one of the two titles, since both
+// titles naming the same tier/category (or neither naming one) isn't a
+// conflict. Deliberately excludes generic descriptors like "console" that a
+// retailer might just omit for the identical product (e.g. "PS5" alone vs
+// "PS5 Console") -- those would false-positive far more than they'd catch.
+const DISTINGUISHING_WORDS = [
+  "pro", "ultra", "plus", "max", "mini", "lite", "se", "air", "note",
+  "buds", "watch", "tablet", "laptop", "headphones", "earbuds",
+  "tv", "camera", "speaker", "keyboard", "mouse", "monitor",
+];
 
-function hasConflictingTier(tokensA: Set<string>, tokensB: Set<string>): boolean {
-  return TIER_WORDS.some((word) => tokensA.has(word) !== tokensB.has(word));
+function hasConflictingDistinguishingWord(tokensA: Set<string>, tokensB: Set<string>): boolean {
+  return DISTINGUISHING_WORDS.some((word) => tokensA.has(word) !== tokensB.has(word));
+}
+
+// The overlap-coefficient false-positive risk applies to bare model/
+// generation numbers too ("iPhone 15" vs "iPhone 14" share "iphone" and
+// disagree on almost nothing else). Neither the size check (no unit
+// attached) nor the model-code check (no letter prefix on the token itself)
+// catches a lone number, so this looks specifically for two short (<=3
+// digit) standalone number tokens that never coincide between the titles --
+// only when BOTH titles have at least one, so a title that simply doesn't
+// mention a number (no signal either way) never trips it.
+function bareNumberTokens(tokens: Set<string>): Set<string> {
+  return new Set([...tokens].filter((token) => /^\d{1,3}$/.test(token)));
+}
+
+function hasConflictingBareNumbers(tokensA: Set<string>, tokensB: Set<string>): boolean {
+  const numbersA = bareNumberTokens(tokensA);
+  const numbersB = bareNumberTokens(tokensB);
+  if (numbersA.size === 0 || numbersB.size === 0) return false;
+  for (const number of numbersA) if (numbersB.has(number)) return false;
+  return true;
 }
 
 // Mutually-exclusive edition/variant keywords that aren't simple tiers.
@@ -165,9 +218,10 @@ function isSameProduct(a: string, b: string): boolean {
   const tokensA = normalizeTitleTokens(a);
   const tokensB = normalizeTitleTokens(b);
   if (hasConflictingModelCode(tokensA, tokensB)) return false;
-  if (hasConflictingTier(tokensA, tokensB)) return false;
+  if (hasConflictingDistinguishingWord(tokensA, tokensB)) return false;
   if (hasConflictingKeywordGroup(tokensA, tokensB)) return false;
-  return titleSimilarity(a, b) >= TITLE_MATCH_THRESHOLD;
+  if (hasConflictingBareNumbers(tokensA, tokensB)) return false;
+  return titleSimilarity(a, b) >= OVERLAP_THRESHOLD;
 }
 
 // Used at favorite-time (ProductBrowser.favoriteAll) to decide whether a
