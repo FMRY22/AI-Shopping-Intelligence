@@ -1,0 +1,176 @@
+name: One-time backfill -- regroup already-tracked products by title match
+on:
+  workflow_dispatch:
+
+jobs:
+  backfill:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Regroup products sharing the same title (cross-session matching retrofit)
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: |
+          node -e '
+          const SUPABASE_URL = process.env.SUPABASE_URL;
+          const KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+          // Port of apps/web/src/lib/product-groups.ts -- kept in sync manually,
+          // this is a one-time throwaway script, not shared code.
+          const TOKEN_SYNONYMS = { generation: "gen" };
+          function normalizeTitleTokens(title) {
+            const joined = title.toLowerCase().replace(/-/g, "");
+            return new Set(
+              joined.replace(/[^\p{L}\p{N}\s]/gu, " ").split(/\s+/).filter(Boolean)
+                .map((t) => TOKEN_SYNONYMS[t] || t)
+            );
+          }
+          function titleSimilarity(a, b) {
+            const A = normalizeTitleTokens(a), B = normalizeTitleTokens(b);
+            if (!A.size || !B.size) return 0;
+            let i = 0;
+            for (const t of A) if (B.has(t)) i++;
+            return i / (A.size + B.size - i);
+          }
+          const SIZE_UNIT_PATTERN = /(\d+(?:\.\d+)?)\s?(gb|tb|mp|mah|inch)\b/g;
+          function extractSizeByUnit(title) {
+            const result = new Map();
+            for (const m of title.toLowerCase().matchAll(SIZE_UNIT_PATTERN)) {
+              const unit = m[2], value = parseFloat(m[1]);
+              const list = result.get(unit);
+              if (list) list.push(value); else result.set(unit, [value]);
+            }
+            return result;
+          }
+          function hasConflictingSizes(a, b) {
+            const sa = extractSizeByUnit(a), sb = extractSizeByUnit(b);
+            for (const [unit, va] of sa) {
+              const vb = sb.get(unit);
+              if (!vb) continue;
+              if (Math.max(...va) !== Math.max(...vb)) return true;
+            }
+            return false;
+          }
+          function trailingDigitSplit(token) {
+            const m = /^([a-z].*?)(\d+)$/.exec(token);
+            if (!m) return null;
+            return { prefix: m[1], digits: m[2] };
+          }
+          function hasConflictingModelCode(tA, tB) {
+            for (const a of tA) {
+              const sa = trailingDigitSplit(a);
+              if (!sa) continue;
+              for (const b of tB) {
+                const sb = trailingDigitSplit(b);
+                if (sb && sa.prefix === sb.prefix && sa.digits !== sb.digits) return true;
+              }
+            }
+            return false;
+          }
+          const TIER_WORDS = ["pro","ultra","plus","max","mini","lite","se","air","note"];
+          function hasConflictingTier(tA, tB) {
+            return TIER_WORDS.some((w) => tA.has(w) !== tB.has(w));
+          }
+          const CONFLICTING_KEYWORD_GROUPS = [["disc","digital"],["wifi","cellular"],["new","refurbished","used"]];
+          function hasConflictingKeywordGroup(tA, tB) {
+            return CONFLICTING_KEYWORD_GROUPS.some((g) => {
+              const inA = g.filter((w) => tA.has(w));
+              const inB = g.filter((w) => tB.has(w));
+              return inA.length > 0 && inB.length > 0 && !inA.some((w) => inB.includes(w));
+            });
+          }
+          function isSameProduct(a, b) {
+            if (hasConflictingSizes(a, b)) return false;
+            const tA = normalizeTitleTokens(a), tB = normalizeTitleTokens(b);
+            if (hasConflictingModelCode(tA, tB)) return false;
+            if (hasConflictingTier(tA, tB)) return false;
+            if (hasConflictingKeywordGroup(tA, tB)) return false;
+            return titleSimilarity(a, b) >= 0.45;
+          }
+
+          async function main() {
+            const res = await fetch(`${SUPABASE_URL}/rest/v1/products?select=id,title_en,specs,current_price`, {
+              headers: { apikey: KEY, Authorization: `Bearer ${KEY}` },
+            });
+            if (!res.ok) throw new Error(`fetch products failed: ${res.status} ${await res.text()}`);
+            const products = await res.json();
+            console.log(`Loaded ${products.length} tracked products`);
+
+            const parent = new Map(products.map((p) => [p.id, p.id]));
+            function find(x) { while (parent.get(x) !== x) { parent.set(x, parent.get(parent.get(x))); x = parent.get(x); } return x; }
+            function union(x, y) { const rx = find(x), ry = find(y); if (rx !== ry) parent.set(rx, ry); }
+
+            // Preserve existing manual groupings first (products already sharing a group_key).
+            const byGroupKey = new Map();
+            for (const p of products) {
+              const gk = p.specs && p.specs.group_key;
+              if (!gk) continue;
+              const list = byGroupKey.get(gk);
+              if (list) list.push(p); else byGroupKey.set(gk, [p]);
+            }
+            for (const list of byGroupKey.values()) {
+              for (let i = 1; i < list.length; i++) union(list[0].id, list[i].id);
+            }
+
+            // Then union any two products whose titles match, regardless of current group_key.
+            let comparisons = 0;
+            for (let i = 0; i < products.length; i++) {
+              for (let j = i + 1; j < products.length; j++) {
+                comparisons++;
+                if (isSameProduct(products[i].title_en, products[j].title_en)) {
+                  union(products[i].id, products[j].id);
+                }
+              }
+            }
+            console.log(`Compared ${comparisons} title pairs`);
+
+            const clusters = new Map();
+            for (const p of products) {
+              const root = find(p.id);
+              const list = clusters.get(root);
+              if (list) list.push(p); else clusters.set(root, [p]);
+            }
+
+            let mergedClusters = 0, updatedRows = 0;
+            for (const members of clusters.values()) {
+              if (members.length < 2) continue;
+              // Canonical key: reuse the most common existing group_key in the cluster,
+              // falling back to the cheapest members normalized title.
+              const existingKeys = members.map((m) => m.specs && m.specs.group_key).filter(Boolean);
+              let canonicalKey;
+              if (existingKeys.length > 0) {
+                const counts = new Map();
+                for (const k of existingKeys) counts.set(k, (counts.get(k) || 0) + 1);
+                canonicalKey = [...counts.entries()].sort((a, b) => b[1] - a[1])[0][0];
+              } else {
+                canonicalKey = members[0].title_en.toLowerCase().trim().replace(/\s+/g, " ");
+              }
+
+              const needsUpdate = members.filter((m) => (m.specs && m.specs.group_key) !== canonicalKey);
+              if (needsUpdate.length === 0) continue;
+              mergedClusters++;
+              console.log(`Cluster "${canonicalKey}": ${members.length} items, updating ${needsUpdate.length}`);
+              for (const m of members) console.log(`  - [${(m.specs && m.specs.group_key) || "none"}] ${m.title_en}`);
+
+              for (const m of needsUpdate) {
+                const newSpecs = { ...(m.specs || {}), group_key: canonicalKey };
+                const patchRes = await fetch(`${SUPABASE_URL}/rest/v1/products?id=eq.${m.id}`, {
+                  method: "PATCH",
+                  headers: {
+                    apikey: KEY,
+                    Authorization: `Bearer ${KEY}`,
+                    "Content-Type": "application/json",
+                    Prefer: "return=minimal",
+                  },
+                  body: JSON.stringify({ specs: newSpecs }),
+                });
+                if (!patchRes.ok) throw new Error(`PATCH ${m.id} failed: ${patchRes.status} ${await patchRes.text()}`);
+                updatedRows++;
+              }
+            }
+
+            console.log(`\nDone. Clusters merged: ${mergedClusters}. Product rows updated: ${updatedRows}.`);
+          }
+
+          main().catch((err) => { console.error(err); process.exit(1); });
+          '
