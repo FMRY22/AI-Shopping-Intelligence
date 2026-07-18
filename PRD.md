@@ -69,11 +69,10 @@ Nothing beyond this is being built right now. See §8 for the full list of what 
 - Product images end-to-end (search results and tracked products).
 - Card-grid UI with search, live results, and a tracked list.
 - Scheduled per-retailer workers (`workers/*`) that keep tracked products' prices fresh and append to `price_history`.
-
-### Phase 1 — the core loop (§1, items 1–5)
-1. **Best-price highlighting** — when live search returns results from multiple retailers, visually mark the cheapest one instead of leaving the user to compare prices by eye.
-2. **Price history chart** (FR-17) — the data is already being collected (`price_history` table, written by the scheduled workers); needs a chart view per tracked product.
-3. **Buy-or-wait signal** (FR-9, simplified) — starts as a simple, explainable rule against the accumulated price history (e.g., current price vs. historical min/median/percentile), not an LLM agent from day one. An LLM-backed version is a possible later upgrade, not a prerequisite for shipping v1 of this.
+- **Phase 1, complete (2026-07-18):**
+  - Best-price highlighting on live search results (cheapest option gets a badge, border, and highlighted price).
+  - Price history chart per tracked product (FR-17) — `GET /api/price-history`, `apps/web/src/components/price-history-chart.tsx`.
+  - Buy-or-wait signal (FR-9, simplified) — a rule against that same price history (near its recorded low/high vs. near its average), reasoning always shown next to the verdict, no LLM involved.
 
 ### Phase 2 — watching favorited products (§1, items 6–10)
 Only applies to products the founder has already favorited/tracked — not a standing-criteria/catalog-wide watch (that stays cut, §8).
@@ -175,14 +174,11 @@ None. Single user, no ads, no affiliate links, no subscriptions, no B2B data pro
 
 ## 10. Next Steps
 
-Phase 1 (build now):
-1. Add best-price highlighting to live search results (§4 Phase 1, item 1).
-2. Build the price history chart view (FR-17).
-3. Ship a first, simple, rule-based buy/wait signal (FR-9) against existing `price_history` data.
+Phase 1 — done (2026-07-18): best-price highlighting, price history chart (FR-17), buy-or-wait signal (FR-9). See §4.
 
-Phase 2 (after Phase 1 ships):
-4. Coupon worker + auto-revalidation for tracked products (FR-4).
-5. Cashback worker for tracked products (FR-5), then coupon+cashback stacking (FR-11).
-6. Review collection + synthesis for tracked products (FR-6, FR-12).
-7. Social/community monitoring for tracked products (FR-7).
-8. Proactive notifications tying the above together, single recipient, with quiet hours (FR-16, FR-20).
+Phase 2 (build now):
+1. Coupon worker + auto-revalidation for tracked products (FR-4).
+2. Cashback worker for tracked products (FR-5), then coupon+cashback stacking (FR-11).
+3. Review collection + synthesis for tracked products (FR-6, FR-12).
+4. Social/community monitoring for tracked products (FR-7).
+5. Proactive notifications tying the above together, single recipient, with quiet hours (FR-16, FR-20).
