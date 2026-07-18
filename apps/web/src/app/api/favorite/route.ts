@@ -15,6 +15,14 @@ interface FavoriteBody {
   price?: number;
   currency?: string;
   imageUrl?: string | null;
+  // The normalized search query this result came from -- lets the same
+  // physical product favorited from multiple retailers in one search
+  // render as one grouped card instead of scattered singles (founder
+  // feedback, 2026-07-18). Stashed in the pre-existing `specs` jsonb
+  // column rather than a new column: no migration path exists from this
+  // environment (no direct Postgres/management-API credential, only the
+  // PostgREST-facing service-role key, which can't run DDL).
+  groupKey?: string | null;
 }
 
 function deriveProductId(url: string): string {
@@ -23,7 +31,7 @@ function deriveProductId(url: string): string {
 
 export async function POST(request: Request): Promise<NextResponse> {
   const body = (await request.json().catch(() => null)) as FavoriteBody | null;
-  const { retailerSlug, url, title, price, currency, imageUrl } = body ?? {};
+  const { retailerSlug, url, title, price, currency, imageUrl, groupKey } = body ?? {};
   if (!retailerSlug || !url || !title || typeof price !== "number" || !currency) {
     return NextResponse.json({ error: "retailerSlug, url, title, price, and currency are required" }, { status: 400 });
   }
@@ -57,6 +65,7 @@ export async function POST(request: Request): Promise<NextResponse> {
       url,
       title_en: title,
       image_url: imageUrl ?? null,
+      specs: groupKey ? { group_key: groupKey } : null,
       current_price: price,
       currency,
       in_stock: true,
@@ -78,4 +87,23 @@ export async function POST(request: Request): Promise<NextResponse> {
   });
 
   return NextResponse.json({ product: inserted });
+}
+
+// DELETE /api/favorite?productId=... -- the inverse of favoriting (founder
+// feedback, 2026-07-18: "can I remove a favorited product?"). price_history
+// rows cascade-delete with the product (0001_init.sql's `on delete cascade`
+// FK), so no separate cleanup is needed here.
+export async function DELETE(request: Request): Promise<NextResponse> {
+  const { searchParams } = new URL(request.url);
+  const productId = searchParams.get("productId");
+  if (!productId) {
+    return NextResponse.json({ error: "productId is required" }, { status: 400 });
+  }
+
+  const db = createServiceClient();
+  const { error } = await db.from("products").delete().eq("id", productId);
+  if (error) {
+    return NextResponse.json({ error: error.message }, { status: 500 });
+  }
+  return NextResponse.json({ ok: true });
 }

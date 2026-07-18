@@ -1,5 +1,5 @@
 import { createBrowserClient } from "@repo/database";
-import type { Product } from "@repo/database";
+import type { Product, Retailer } from "@repo/database";
 import { ProductBrowser } from "@/components/product-browser";
 
 // Still the collection pipeline's raw output (UI.md §8's later feature
@@ -18,13 +18,24 @@ async function getProducts(): Promise<Product[]> {
   return data ?? [];
 }
 
+// Small, effectively-static table (4 rows) -- fetched once here rather than
+// per-request from the client, so ProductBrowser can resolve a tracked
+// product's retailer_id to a slug/badge without a join (avoids a
+// search_products RPC signature change, which would need a migration).
+async function getRetailers(): Promise<Retailer[]> {
+  const db = createBrowserClient();
+  const { data, error } = await db.from("retailers").select("*");
+  if (error) throw new Error(`could not load retailers: ${error.message}`);
+  return data ?? [];
+}
+
 export default async function HomePage() {
-  const products = await getProducts();
+  const [products, retailers] = await Promise.all([getProducts(), getRetailers()]);
 
   return (
     <main className="min-h-screen bg-gray-50 dark:bg-[#0b0b0d]">
       <div className="mx-auto max-w-5xl px-6 py-8">
-        <ProductBrowser initialProducts={products} />
+        <ProductBrowser initialProducts={products} retailers={retailers} />
       </div>
     </main>
   );

@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import type { Product } from "@repo/database";
+import { useEffect, useMemo, useState } from "react";
+import type { Product, Retailer } from "@repo/database";
 import { PriceHistoryModal } from "@/components/price-history-chart";
 
 interface LiveResult {
@@ -87,14 +87,18 @@ function PriceTag({
   price,
   currency,
   highlight,
+  small,
 }: {
   price: number | null;
   currency: string;
   highlight?: boolean;
+  small?: boolean;
 }) {
   if (price == null) return <span className="text-sm text-gray-400 dark:text-white/40">—</span>;
   return (
-    <span className={`text-lg font-bold ${highlight ? "text-emerald-600 dark:text-emerald-400" : "text-gray-900 dark:text-white"}`}>
+    <span
+      className={`${small ? "text-sm" : "text-lg"} font-bold ${highlight ? "text-emerald-600 dark:text-emerald-400" : "text-gray-900 dark:text-white"}`}
+    >
       {price.toLocaleString()} <span className="text-xs font-medium text-gray-400 dark:text-white/40">{currency}</span>
     </span>
   );
@@ -181,46 +185,104 @@ function FavoriteButton({
   );
 }
 
-// A small chart-icon button over the image, mirroring FavoriteButton's
-// sibling-of-<a> placement (§ above) -- opens the price history modal
-// (PRD.md FR-17) without competing with the card's own link to the
-// retailer. Restructured from a single whole-card <a> (image-only <a> +
-// separate title <a>, like LiveResultCard) specifically so this button
-// isn't nested inside an anchor, which is invalid HTML and would need
-// preventDefault/stopPropagation gymnastics to behave.
-function HistoryButton({ onClick }: { onClick: () => void }) {
+// Small ghost icon button for an inline retailer row (chart / remove) --
+// distinct from FavoriteButton's floating-over-the-image style, which only
+// made sense with exactly one action per card. A grouped card (below) has
+// one row per retailer, each with its own actions, so the actions live in
+// the row instead of overlaid on a single shared image.
+function RowIconButton({
+  onClick,
+  label,
+  children,
+}: {
+  onClick: () => void;
+  label: string;
+  children: React.ReactNode;
+}) {
   return (
     <button
       type="button"
       onClick={onClick}
-      aria-label="Price history"
-      className="absolute right-2 top-2 flex h-8 w-8 items-center justify-center rounded-full bg-white/90 text-gray-700 shadow-md backdrop-blur-sm transition hover:bg-white hover:text-indigo-600 dark:bg-white/15 dark:text-white dark:hover:bg-white/25"
+      aria-label={label}
+      className="rounded-full p-1.5 text-gray-400 transition hover:bg-gray-100 hover:text-gray-700 dark:text-white/40 dark:hover:bg-white/10 dark:hover:text-white"
     >
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="h-4 w-4">
-        <path d="M3 3v16a2 2 0 0 0 2 2h16" />
-        <path d="m7 14 4-4 3 3 5-6" />
-      </svg>
+      {children}
     </button>
   );
 }
 
-function TrackedProductCard({ product, onShowHistory }: { product: Product; onShowHistory: () => void }) {
+function HistoryIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="h-4 w-4">
+      <path d="M3 3v16a2 2 0 0 0 2 2h16" />
+      <path d="m7 14 4-4 3 3 5-6" />
+    </svg>
+  );
+}
+
+function TrashIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="h-4 w-4">
+      <path d="M4 7h16M9 7V5a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2m3 0-1 13a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 7h14Z" />
+    </svg>
+  );
+}
+
+// One product, tracked across however many retailers the founder favorited
+// it from -- founder feedback (2026-07-18): favoriting the same product
+// from multiple retailers was rendering as separate, unrelated cards
+// instead of one card comparing them. The image/title come from the
+// cheapest item (`items[0]`, pre-sorted by the caller); every retailer gets
+// its own row below with its own price, history, and remove action, since
+// each retailer's listing has its own independent price_history series.
+function TrackedProductGroupCard({
+  items,
+  retailerSlugById,
+  onShowHistory,
+  onRemove,
+}: {
+  items: Product[];
+  retailerSlugById: Record<string, string>;
+  onShowHistory: (product: Product) => void;
+  onRemove: (product: Product) => void;
+}) {
+  const hero = items[0]!;
+  const cheapestPrice = items.reduce<number | null>((min, p) => {
+    if (p.current_price == null) return min;
+    return min == null ? p.current_price : Math.min(min, p.current_price);
+  }, null);
+
   return (
     <div className="flex flex-col overflow-hidden rounded-2xl border border-gray-100 bg-white p-3 shadow-sm transition hover:-translate-y-1 hover:shadow-lg dark:border-white/10 dark:bg-white/[0.03]">
       <div className="relative">
-        <a href={product.url} target="_blank" rel="noreferrer" className="block">
-          <ProductImage src={product.image_url} alt={product.title_en} />
+        <a href={hero.url} target="_blank" rel="noreferrer" className="block">
+          <ProductImage src={hero.image_url} alt={hero.title_en} />
         </a>
-        <StockPill inStock={product.in_stock} />
-        <HistoryButton onClick={onShowHistory} />
+        <StockPill inStock={items.some((p) => p.in_stock)} />
       </div>
-      <a href={product.url} target="_blank" rel="noreferrer" className="group">
-        <p className="mt-3 line-clamp-2 min-h-[2.5rem] text-sm font-medium text-gray-900 group-hover:text-indigo-600 dark:text-white dark:group-hover:text-indigo-300">
-          {product.title_en}
-        </p>
-      </a>
-      <div className="mt-2">
-        <PriceTag price={product.current_price} currency={product.currency} />
+      <p className="mt-3 line-clamp-2 min-h-[2.5rem] text-sm font-medium text-gray-900 dark:text-white">{hero.title_en}</p>
+      <div className="mt-2 flex flex-col divide-y divide-gray-50 dark:divide-white/5">
+        {items.map((product) => (
+          <div key={product.id} className="flex items-center justify-between gap-2 py-1.5 first:pt-0 last:pb-0">
+            <a href={product.url} target="_blank" rel="noreferrer" className="flex min-w-0 items-center gap-2">
+              <RetailerBadge slug={retailerSlugById[product.retailer_id] ?? "?"} />
+              <PriceTag
+                price={product.current_price}
+                currency={product.currency}
+                highlight={cheapestPrice != null && product.current_price === cheapestPrice}
+                small
+              />
+            </a>
+            <div className="flex shrink-0 items-center gap-0.5">
+              <RowIconButton onClick={() => onShowHistory(product)} label="Price history">
+                <HistoryIcon />
+              </RowIconButton>
+              <RowIconButton onClick={() => onRemove(product)} label="Remove">
+                <TrashIcon />
+              </RowIconButton>
+            </div>
+          </div>
+        ))}
       </div>
     </div>
   );
@@ -290,7 +352,13 @@ function SearchIcon() {
 // Live results are shown separately and are NOT saved automatically -- the
 // founder wants tracking to require a deliberate "favorite" action per
 // result (POST /api/favorite), not just showing up in a search.
-export function ProductBrowser({ initialProducts }: { initialProducts: Product[] }) {
+export function ProductBrowser({
+  initialProducts,
+  retailers,
+}: {
+  initialProducts: Product[];
+  retailers: Retailer[];
+}) {
   const [query, setQuery] = useState("");
   const [products, setProducts] = useState(initialProducts);
   const [isSearching, setIsSearching] = useState(false);
@@ -299,6 +367,8 @@ export function ProductBrowser({ initialProducts }: { initialProducts: Product[]
   const [liveResults, setLiveResults] = useState<LiveResult[]>([]);
   const [favoriteStatus, setFavoriteStatus] = useState<Record<string, "idle" | "saving" | "saved" | "error">>({});
   const [historyProduct, setHistoryProduct] = useState<{ id: string; title: string; currency: string } | null>(null);
+
+  const retailerSlugById = useMemo(() => Object.fromEntries(retailers.map((r) => [r.id, r.slug])), [retailers]);
 
   useEffect(() => {
     const trimmed = query.trim();
@@ -352,11 +422,15 @@ export function ProductBrowser({ initialProducts }: { initialProducts: Product[]
   }
 
   function favorite(result: LiveResult) {
+    // Everything favorited out of the same live search shares a group_key
+    // (the normalized query), so it renders as one grouped card instead of
+    // scattered singles -- founder feedback, 2026-07-18.
+    const groupKey = query.trim().toLowerCase().replace(/\s+/g, " ");
     setFavoriteStatus((prev) => ({ ...prev, [result.url]: "saving" }));
     fetch("/api/favorite", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(result),
+      body: JSON.stringify({ ...result, groupKey }),
     })
       .then((res) => res.json() as Promise<{ product?: Product; error?: string }>)
       .then((data) => {
@@ -370,7 +444,45 @@ export function ProductBrowser({ initialProducts }: { initialProducts: Product[]
       .catch(() => setFavoriteStatus((prev) => ({ ...prev, [result.url]: "error" })));
   }
 
+  function removeProduct(product: Product) {
+    const confirmed = window.confirm(
+      `Remove "${product.title_en}" from tracked? / إزالة "${product.title_en}" من المتابَعة؟`,
+    );
+    if (!confirmed) return;
+    fetch(`/api/favorite?productId=${encodeURIComponent(product.id)}`, { method: "DELETE" })
+      .then((res) => res.json() as Promise<{ ok?: boolean; error?: string }>)
+      .then((data) => {
+        if (data.error) {
+          console.error(data.error);
+          return;
+        }
+        setProducts((prev) => prev.filter((p) => p.id !== product.id));
+        setHistoryProduct((prev) => (prev?.id === product.id ? null : prev));
+      })
+      .catch((err: unknown) => console.error(err));
+  }
+
   const lowestLivePrice = liveResults.length > 0 ? Math.min(...liveResults.map((r) => r.price)) : null;
+
+  // Groups favorited items by the search they were favorited from (see
+  // `favorite()`), falling back to the product's own id so anything without
+  // a group_key (favorited before this feature, or favorited alone) still
+  // renders as its own single-item group. Sorted cheapest-first within a
+  // group so `items[0]` is always the hero/cheapest for display.
+  const trackedGroups = useMemo(() => {
+    const map = new Map<string, Product[]>();
+    for (const product of products) {
+      const specs = product.specs as { group_key?: string } | null;
+      const key = specs?.group_key || product.id;
+      const list = map.get(key);
+      if (list) list.push(product);
+      else map.set(key, [product]);
+    }
+    return Array.from(map.entries()).map(([key, items]) => ({
+      key,
+      items: [...items].sort((a, b) => (a.current_price ?? Infinity) - (b.current_price ?? Infinity)),
+    }));
+  }, [products]);
 
   return (
     <div>
@@ -441,15 +553,17 @@ export function ProductBrowser({ initialProducts }: { initialProducts: Product[]
       )}
 
       <div className="mt-8">
-        {products.length > 0 && <SectionLabel>Tracked / متابَع</SectionLabel>}
+        {trackedGroups.length > 0 && <SectionLabel>Tracked / متابَع</SectionLabel>}
         <div className="mt-4 grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
-          {products.map((product) => (
-            <TrackedProductCard
-              key={product.id}
-              product={product}
-              onShowHistory={() =>
+          {trackedGroups.map((group) => (
+            <TrackedProductGroupCard
+              key={group.key}
+              items={group.items}
+              retailerSlugById={retailerSlugById}
+              onShowHistory={(product) =>
                 setHistoryProduct({ id: product.id, title: product.title_en, currency: product.currency })
               }
+              onRemove={removeProduct}
             />
           ))}
         </div>
