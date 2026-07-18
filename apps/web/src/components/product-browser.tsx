@@ -217,45 +217,49 @@ function UngroupIcon() {
   );
 }
 
-// Row-scale favorite action for a live-result row -- same state machine as
-// the old floating FavoriteButton, just sized/styled to sit next to
-// RowIconButton instead of overlaid on the image.
-function RowFavoriteButton({
+// Card-scale "track this product" action -- founder feedback (2026-07-18):
+// "it's supposed to be search -- if I favorite it, it favorites the
+// product; the retailer is just where to buy it." Favoriting used to be a
+// per-retailer-row button; now it's one action for the whole card that
+// tracks every retailer currently shown for that product at once (loop
+// POST /api/favorite, all sharing the same group_key -- see
+// ProductBrowser's favoriteAll). A full-width button reads more clearly as
+// "one decision for this product" than N small per-row buttons would.
+function TrackAllButton({
   status,
   onClick,
 }: {
   status: "idle" | "saving" | "saved" | "error";
   onClick: () => void;
 }) {
+  const label =
+    status === "saved"
+      ? "Tracking / تتم متابعته"
+      : status === "saving"
+        ? "Saving… / جارِ الحفظ..."
+        : status === "error"
+          ? "Retry / أعد المحاولة"
+          : "Track this product / تابع هذا المنتج";
   return (
     <button
       type="button"
       onClick={onClick}
       disabled={status === "saving" || status === "saved"}
-      aria-label="Favorite"
-      className={`flex h-7 w-7 items-center justify-center rounded-full transition disabled:cursor-default ${
+      className={`mt-3 flex items-center justify-center gap-1.5 rounded-full py-2 text-sm font-semibold transition disabled:cursor-default ${
         status === "saved"
-          ? "bg-indigo-600 text-white"
+          ? "bg-emerald-50 text-emerald-600 dark:bg-emerald-500/10 dark:text-emerald-300"
           : status === "error"
-            ? "bg-red-500 text-white"
-            : "text-gray-400 hover:bg-gray-100 hover:text-indigo-600 dark:text-white/40 dark:hover:bg-white/10 dark:hover:text-white"
+            ? "bg-red-50 text-red-600 dark:bg-red-500/10 dark:text-red-300"
+            : "bg-indigo-600 text-white hover:bg-indigo-500 dark:bg-indigo-500 dark:hover:bg-indigo-400"
       }`}
     >
-      {status === "saving" ? (
-        <span className="h-3 w-3 animate-spin rounded-full border-2 border-current border-t-transparent" />
-      ) : status === "saved" ? (
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} className="h-3.5 w-3.5">
+      {status === "saving" && <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-current border-t-transparent" />}
+      {status === "saved" && (
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} className="h-4 w-4">
           <path d="M20 6 9 17l-5-5" />
         </svg>
-      ) : status === "error" ? (
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} className="h-3.5 w-3.5">
-          <path d="M12 5v9M12 18v.01" />
-        </svg>
-      ) : (
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="h-3.5 w-3.5">
-          <path d="M12 17.3 6.2 21l1.5-6.6L2.5 9.9l6.7-.6L12 3l2.8 6.3 6.7.6-5.2 4.5 1.5 6.6z" />
-        </svg>
       )}
+      {label}
     </button>
   );
 }
@@ -265,21 +269,27 @@ function RowFavoriteButton({
 // from multiple retailers was rendering as separate, unrelated cards
 // instead of one card comparing them. The image comes from the cheapest
 // item (`items[0]`, pre-sorted by the caller); every retailer gets its own
-// row below with its own price, history, and remove action, since each
-// retailer's listing has its own independent price_history series.
+// row below with its own price and history action, since each retailer's
+// listing has its own independent price_history series.
+//
+// Removing is a card-level action, not per-row -- founder feedback
+// (2026-07-18): "if I delete it, it deletes the product; the retailer is
+// just where to buy it," same framing as the favorite button above. The
+// per-row ungroup/split action still exists for the narrower case of "this
+// one retailer got grouped into the wrong product," which is a distinct
+// concern from "I don't want this product tracked at all."
 //
 // Also carries the founder's follow-up "additional improvements" batch
 // (2026-07-18): an editable display title (specs.group_title, falls back to
-// the hero's own title), a per-row "last checked" timestamp, a per-row
-// ungroup/split action (only when the group has more than one retailer --
-// splitting a singleton is a no-op), and a merge-into-another-group picker
-// for fixing a grouping the automatic query-based heuristic got wrong.
+// the hero's own title), a per-row "last checked" timestamp, and a
+// merge-into-another-group picker for fixing a grouping the automatic
+// query-based heuristic got wrong.
 function TrackedProductGroupCard({
   items,
   retailerSlugById,
   otherGroups,
   onShowHistory,
-  onRemove,
+  onRemoveGroup,
   onUngroup,
   onMerge,
   onRename,
@@ -288,7 +298,7 @@ function TrackedProductGroupCard({
   retailerSlugById: Record<string, string>;
   otherGroups: { key: string; title: string }[];
   onShowHistory: (product: Product) => void;
-  onRemove: (product: Product) => void;
+  onRemoveGroup: () => void;
   onUngroup: (product: Product) => void;
   onMerge: (targetGroupKey: string) => void;
   onRename: (title: string) => void;
@@ -349,6 +359,14 @@ function TrackedProductGroupCard({
           >
             <PencilIcon />
           </button>
+          <button
+            type="button"
+            onClick={onRemoveGroup}
+            aria-label="Remove product"
+            className="shrink-0 rounded-full p-1 text-gray-300 transition hover:bg-red-50 hover:text-red-500 dark:text-white/20 dark:hover:bg-red-500/10 dark:hover:text-red-400"
+          >
+            <TrashIcon />
+          </button>
         </div>
       )}
 
@@ -376,9 +394,6 @@ function TrackedProductGroupCard({
                   <UngroupIcon />
                 </RowIconButton>
               )}
-              <RowIconButton onClick={() => onRemove(product)} label="Remove">
-                <TrashIcon />
-              </RowIconButton>
             </div>
           </div>
         ))}
@@ -412,21 +427,27 @@ function TrackedProductGroupCard({
 // it's actually tracked (`trackedByUrl` match) -- price history only starts
 // accumulating from the moment of favoriting, so showing the icon earlier
 // would open a chart with nothing in it.
+//
+// Favoriting is a single card-level action (TrackAllButton), not a
+// per-retailer-row button -- founder feedback (2026-07-18): "it's supposed
+// to be search -- if I favorite it, it favorites the product." One tap
+// tracks every retailer currently shown for this product at once.
 function LiveResultGroupCard({
   results,
-  favoriteStatus,
-  onFavorite,
+  status,
+  onTrackAll,
   trackedByUrl,
   onShowHistory,
 }: {
   results: LiveResult[];
-  favoriteStatus: Record<string, "idle" | "saving" | "saved" | "error">;
-  onFavorite: (result: LiveResult) => void;
+  status: "idle" | "saving" | "saved" | "error";
+  onTrackAll: () => void;
   trackedByUrl: Record<string, Product>;
   onShowHistory: (product: Product) => void;
 }) {
   const hero = results[0]!;
   const cheapestPrice = Math.min(...results.map((r) => r.price));
+  const allTracked = results.every((r) => trackedByUrl[r.url]);
 
   return (
     <div className="flex flex-col overflow-hidden rounded-2xl border border-gray-100 bg-white p-3 shadow-sm transition hover:-translate-y-1 hover:shadow-lg dark:border-white/10 dark:bg-white/[0.03]">
@@ -437,29 +458,22 @@ function LiveResultGroupCard({
       <div className="mt-2 flex flex-col divide-y divide-gray-50 dark:divide-white/5">
         {results.map((result) => {
           const tracked = trackedByUrl[result.url];
-          // Already-tracked rows (from a previous session, or just favorited
-          // in this one) always read as "saved" -- favoriteStatus only knows
-          // about actions taken in the current session, but trackedByUrl is
-          // the actual source of truth for whether it's being followed.
-          const status = tracked ? "saved" : (favoriteStatus[result.url] ?? "idle");
           return (
             <div key={`${result.retailerSlug}:${result.url}`} className="flex items-center justify-between gap-2 py-1.5 first:pt-0 last:pb-0">
               <a href={result.url} target="_blank" rel="noreferrer" className="flex min-w-0 items-center gap-2">
                 <RetailerBadge slug={result.retailerSlug} />
                 <PriceTag price={result.price} currency={result.currency} highlight={result.price === cheapestPrice} small />
               </a>
-              <div className="flex shrink-0 items-center gap-0.5">
-                {tracked && (
-                  <RowIconButton onClick={() => onShowHistory(tracked)} label="Price history">
-                    <HistoryIcon />
-                  </RowIconButton>
-                )}
-                <RowFavoriteButton status={status} onClick={() => onFavorite(result)} />
-              </div>
+              {tracked && (
+                <RowIconButton onClick={() => onShowHistory(tracked)} label="Price history">
+                  <HistoryIcon />
+                </RowIconButton>
+              )}
             </div>
           );
         })}
       </div>
+      <TrackAllButton status={allTracked ? "saved" : status} onClick={onTrackAll} />
     </div>
   );
 }
@@ -504,7 +518,7 @@ export function ProductBrowser({
   const [isTracking, setIsTracking] = useState(false);
   const [trackError, setTrackError] = useState<string | null>(null);
   const [liveResults, setLiveResults] = useState<LiveResult[]>([]);
-  const [favoriteStatus, setFavoriteStatus] = useState<Record<string, "idle" | "saving" | "saved" | "error">>({});
+  const [liveFavoriteStatus, setLiveFavoriteStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [historyProduct, setHistoryProduct] = useState<{ id: string; title: string; currency: string } | null>(null);
   const [trackedSort, setTrackedSort] = useState<"recent" | "savings">("recent");
 
@@ -543,7 +557,7 @@ export function ProductBrowser({
     setIsTracking(true);
     setTrackError(null);
     setLiveResults([]);
-    setFavoriteStatus({});
+    setLiveFavoriteStatus("idle");
     fetch("/api/track", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -561,43 +575,55 @@ export function ProductBrowser({
       .finally(() => setIsTracking(false));
   }
 
-  function favorite(result: LiveResult) {
-    // Everything favorited out of the same live search shares a group_key
-    // (the normalized query), so it renders as one grouped card instead of
-    // scattered singles -- founder feedback, 2026-07-18.
+  // Tracks every retailer currently shown for this product at once, not one
+  // at a time -- founder feedback (2026-07-18): "it's supposed to be
+  // search -- if I favorite it, it favorites the product; the retailer is
+  // just where to buy it." All share the same group_key (the normalized
+  // query), so they land as one grouped card.
+  function favoriteAll(results: LiveResult[]) {
     const groupKey = query.trim().toLowerCase().replace(/\s+/g, " ");
-    setFavoriteStatus((prev) => ({ ...prev, [result.url]: "saving" }));
-    fetch("/api/favorite", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ...result, groupKey }),
-    })
-      .then((res) => res.json() as Promise<{ product?: Product; error?: string }>)
-      .then((data) => {
-        if (data.error || !data.product) {
-          setFavoriteStatus((prev) => ({ ...prev, [result.url]: "error" }));
-          return;
-        }
-        setFavoriteStatus((prev) => ({ ...prev, [result.url]: "saved" }));
-        setProducts((prev) => [data.product!, ...prev.filter((p) => p.id !== data.product!.id)]);
+    setLiveFavoriteStatus("saving");
+    Promise.all(
+      results.map((result) =>
+        fetch("/api/favorite", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ...result, groupKey }),
+        }).then((res) => res.json() as Promise<{ product?: Product; error?: string }>),
+      ),
+    )
+      .then((responses) => {
+        const succeeded = responses.filter((r): r is { product: Product } => !!r.product);
+        setLiveFavoriteStatus(succeeded.length === results.length ? "saved" : "error");
+        if (succeeded.length === 0) return;
+        setProducts((prev) => {
+          const byId = new Map(prev.map((p) => [p.id, p]));
+          for (const { product } of succeeded) byId.set(product.id, product);
+          return Array.from(byId.values());
+        });
       })
-      .catch(() => setFavoriteStatus((prev) => ({ ...prev, [result.url]: "error" })));
+      .catch(() => setLiveFavoriteStatus("error"));
   }
 
-  function removeProduct(product: Product) {
-    const confirmed = window.confirm(
-      `Remove "${product.title_en}" from tracked? / إزالة "${product.title_en}" من المتابَعة؟`,
-    );
+  // Removes every retailer in the group at once, not one row at a time --
+  // same "delete removes the product" framing as favoriteAll above
+  // (founder feedback, 2026-07-18).
+  function removeGroup(items: Product[]) {
+    const title = items[0]?.title_en ?? "this product";
+    const confirmed = window.confirm(`Remove "${title}" from tracked? / إزالة "${title}" من المتابَعة؟`);
     if (!confirmed) return;
-    fetch(`/api/favorite?productId=${encodeURIComponent(product.id)}`, { method: "DELETE" })
-      .then((res) => res.json() as Promise<{ ok?: boolean; error?: string }>)
-      .then((data) => {
-        if (data.error) {
-          console.error(data.error);
-          return;
-        }
-        setProducts((prev) => prev.filter((p) => p.id !== product.id));
-        setHistoryProduct((prev) => (prev?.id === product.id ? null : prev));
+    Promise.all(
+      items.map((p) =>
+        fetch(`/api/favorite?productId=${encodeURIComponent(p.id)}`, { method: "DELETE" }).then(
+          (res) => res.json() as Promise<{ ok?: boolean; error?: string }>,
+        ),
+      ),
+    )
+      .then((responses) => {
+        const removedIds = items.filter((_, i) => responses[i]?.ok).map((p) => p.id);
+        if (removedIds.length === 0) return;
+        setProducts((prev) => prev.filter((p) => !removedIds.includes(p.id)));
+        setHistoryProduct((prev) => (prev && removedIds.includes(prev.id) ? null : prev));
       })
       .catch((err: unknown) => console.error(err));
   }
@@ -741,12 +767,12 @@ export function ProductBrowser({
 
       {liveResults.length > 0 && (
         <div className="mt-8">
-          <SectionLabel>Live results — tap Favorite to track / نتائج حية — اضغط تفضيل للمتابعة</SectionLabel>
+          <SectionLabel>Live results — tap Track to follow / نتائج حية — اضغط تابع للمتابعة</SectionLabel>
           <div className="mt-4 grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
             <LiveResultGroupCard
               results={[...liveResults].sort((a, b) => a.price - b.price)}
-              favoriteStatus={favoriteStatus}
-              onFavorite={favorite}
+              status={liveFavoriteStatus}
+              onTrackAll={() => favoriteAll(liveResults)}
               trackedByUrl={trackedByUrl}
               onShowHistory={(product) =>
                 setHistoryProduct({ id: product.id, title: product.title_en, currency: product.currency })
@@ -794,7 +820,7 @@ export function ProductBrowser({
                 onShowHistory={(product) =>
                   setHistoryProduct({ id: product.id, title: product.title_en, currency: product.currency })
                 }
-                onRemove={removeProduct}
+                onRemoveGroup={() => removeGroup(group.items)}
                 onUngroup={ungroupProduct}
                 onMerge={(targetGroupKey) => mergeGroupInto(group.items, targetGroupKey)}
                 onRename={(title) => renameGroup(group.items, title)}
