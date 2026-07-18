@@ -24,6 +24,30 @@ function retailerLabel(slug: string): string {
   return RETAILER_LABELS[slug] ?? slug;
 }
 
+// "Last checked" indicator per retailer row (founder-requested, 2026-07-18)
+// -- a coarse relative time is enough to answer "is this data stale," not a
+// precise duration.
+function formatRelativeTime(iso: string | null): string {
+  if (!iso) return "—";
+  const minutes = Math.floor((Date.now() - new Date(iso).getTime()) / 60000);
+  if (minutes < 1) return "just now / الآن";
+  if (minutes < 60) return `${minutes}m ago / قبل ${minutes} د`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago / قبل ${hours} س`;
+  const days = Math.floor(hours / 24);
+  return `${days}d ago / قبل ${days} يوم`;
+}
+
+// Biggest gap between the cheapest and priciest tracked retailer for one
+// product -- the "sort by savings" option (founder-requested, 2026-07-18):
+// products with the widest spread are where picking the right store
+// matters most. Single-retailer groups have nothing to compare, hence 0.
+function groupSavings(items: Product[]): number {
+  const prices = items.map((p) => p.current_price).filter((p): p is number => p != null);
+  if (prices.length < 2) return 0;
+  return Math.max(...prices) - Math.min(...prices);
+}
+
 // Not a plain <img>: a broken or still-pending <img src> renders its alt
 // text at natural size in a way that escapes normal box clipping in
 // Chromium -- confirmed via a local screenshot where a network-blocked
@@ -171,6 +195,28 @@ function TrashIcon() {
   );
 }
 
+function PencilIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="h-3.5 w-3.5">
+      <path d="M12 20h9" />
+      <path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" />
+    </svg>
+  );
+}
+
+// "Split" -- undo an accidental/wrong merge for one retailer row, leaving
+// the rest of the group intact (founder-requested, 2026-07-18).
+function UngroupIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="h-4 w-4">
+      <circle cx="6" cy="6" r="2.5" />
+      <circle cx="6" cy="18" r="2.5" />
+      <circle cx="18" cy="12" r="2.5" />
+      <path d="M8 7.5 15.5 11M8 16.5 15.5 13" />
+    </svg>
+  );
+}
+
 // Row-scale favorite action for a live-result row -- same state machine as
 // the old floating FavoriteButton, just sized/styled to sit next to
 // RowIconButton instead of overlaid on the image.
@@ -217,52 +263,119 @@ function RowFavoriteButton({
 // One product, tracked across however many retailers the founder favorited
 // it from -- founder feedback (2026-07-18): favoriting the same product
 // from multiple retailers was rendering as separate, unrelated cards
-// instead of one card comparing them. The image/title come from the
-// cheapest item (`items[0]`, pre-sorted by the caller); every retailer gets
-// its own row below with its own price, history, and remove action, since
-// each retailer's listing has its own independent price_history series.
+// instead of one card comparing them. The image comes from the cheapest
+// item (`items[0]`, pre-sorted by the caller); every retailer gets its own
+// row below with its own price, history, and remove action, since each
+// retailer's listing has its own independent price_history series.
+//
+// Also carries the founder's follow-up "additional improvements" batch
+// (2026-07-18): an editable display title (specs.group_title, falls back to
+// the hero's own title), a per-row "last checked" timestamp, a per-row
+// ungroup/split action (only when the group has more than one retailer --
+// splitting a singleton is a no-op), and a merge-into-another-group picker
+// for fixing a grouping the automatic query-based heuristic got wrong.
 function TrackedProductGroupCard({
   items,
   retailerSlugById,
+  otherGroups,
   onShowHistory,
   onRemove,
+  onUngroup,
+  onMerge,
+  onRename,
 }: {
   items: Product[];
   retailerSlugById: Record<string, string>;
+  otherGroups: { key: string; title: string }[];
   onShowHistory: (product: Product) => void;
   onRemove: (product: Product) => void;
+  onUngroup: (product: Product) => void;
+  onMerge: (targetGroupKey: string) => void;
+  onRename: (title: string) => void;
 }) {
   const hero = items[0]!;
+  const customTitle = items
+    .map((p) => (p.specs as { group_title?: string } | null)?.group_title)
+    .find((t): t is string => !!t);
+  const displayTitle = customTitle || hero.title_en;
+
+  const [editingTitle, setEditingTitle] = useState(false);
+  const [titleDraft, setTitleDraft] = useState(displayTitle);
+
   const cheapestPrice = items.reduce<number | null>((min, p) => {
     if (p.current_price == null) return min;
     return min == null ? p.current_price : Math.min(min, p.current_price);
   }, null);
 
+  function commitRename() {
+    setEditingTitle(false);
+    const trimmed = titleDraft.trim();
+    if (trimmed && trimmed !== displayTitle) onRename(trimmed);
+  }
+
   return (
     <div className="flex flex-col overflow-hidden rounded-2xl border border-gray-100 bg-white p-3 shadow-sm transition hover:-translate-y-1 hover:shadow-lg dark:border-white/10 dark:bg-white/[0.03]">
       <div className="relative">
         <a href={hero.url} target="_blank" rel="noreferrer" className="block">
-          <ProductImage src={hero.image_url} alt={hero.title_en} />
+          <ProductImage src={hero.image_url} alt={displayTitle} />
         </a>
         <StockPill inStock={items.some((p) => p.in_stock)} />
       </div>
-      <p className="mt-3 line-clamp-2 min-h-[2.5rem] text-sm font-medium text-gray-900 dark:text-white">{hero.title_en}</p>
+
+      {editingTitle ? (
+        <input
+          autoFocus
+          value={titleDraft}
+          onChange={(e) => setTitleDraft(e.target.value)}
+          onBlur={commitRename}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") commitRename();
+            if (e.key === "Escape") setEditingTitle(false);
+          }}
+          dir="auto"
+          className="mt-3 w-full rounded-md border border-indigo-300 bg-white px-2 py-1 text-sm text-gray-900 outline-none dark:border-indigo-400 dark:bg-white/5 dark:text-white"
+        />
+      ) : (
+        <div className="mt-3 flex items-start gap-1">
+          <p className="line-clamp-2 min-h-[2.5rem] flex-1 text-sm font-medium text-gray-900 dark:text-white">{displayTitle}</p>
+          <button
+            type="button"
+            onClick={() => {
+              setTitleDraft(displayTitle);
+              setEditingTitle(true);
+            }}
+            aria-label="Rename"
+            className="shrink-0 rounded-full p-1 text-gray-300 transition hover:bg-gray-100 hover:text-gray-600 dark:text-white/20 dark:hover:bg-white/10 dark:hover:text-white/70"
+          >
+            <PencilIcon />
+          </button>
+        </div>
+      )}
+
       <div className="mt-2 flex flex-col divide-y divide-gray-50 dark:divide-white/5">
         {items.map((product) => (
           <div key={product.id} className="flex items-center justify-between gap-2 py-1.5 first:pt-0 last:pb-0">
-            <a href={product.url} target="_blank" rel="noreferrer" className="flex min-w-0 items-center gap-2">
-              <RetailerBadge slug={retailerSlugById[product.retailer_id] ?? "?"} />
-              <PriceTag
-                price={product.current_price}
-                currency={product.currency}
-                highlight={cheapestPrice != null && product.current_price === cheapestPrice}
-                small
-              />
+            <a href={product.url} target="_blank" rel="noreferrer" className="flex min-w-0 flex-col gap-0.5">
+              <span className="flex items-center gap-2">
+                <RetailerBadge slug={retailerSlugById[product.retailer_id] ?? "?"} />
+                <PriceTag
+                  price={product.current_price}
+                  currency={product.currency}
+                  highlight={cheapestPrice != null && product.current_price === cheapestPrice}
+                  small
+                />
+              </span>
+              <span className="text-[10px] text-gray-400 dark:text-white/30">{formatRelativeTime(product.last_checked_at)}</span>
             </a>
             <div className="flex shrink-0 items-center gap-0.5">
               <RowIconButton onClick={() => onShowHistory(product)} label="Price history">
                 <HistoryIcon />
               </RowIconButton>
+              {items.length > 1 && (
+                <RowIconButton onClick={() => onUngroup(product)} label="Split into its own product">
+                  <UngroupIcon />
+                </RowIconButton>
+              )}
               <RowIconButton onClick={() => onRemove(product)} label="Remove">
                 <TrashIcon />
               </RowIconButton>
@@ -270,6 +383,23 @@ function TrackedProductGroupCard({
           </div>
         ))}
       </div>
+
+      {otherGroups.length > 0 && (
+        <select
+          value=""
+          onChange={(e) => {
+            if (e.target.value) onMerge(e.target.value);
+          }}
+          className="mt-2 w-full rounded-md border border-gray-200 bg-white px-1.5 py-1 text-[11px] text-gray-500 outline-none dark:border-white/10 dark:bg-white/5 dark:text-white/50"
+        >
+          <option value="">Merge with another tracked product… / دمج مع منتج آخر...</option>
+          {otherGroups.map((g) => (
+            <option key={g.key} value={g.key}>
+              {g.title}
+            </option>
+          ))}
+        </select>
+      )}
     </div>
   );
 }
@@ -376,6 +506,7 @@ export function ProductBrowser({
   const [liveResults, setLiveResults] = useState<LiveResult[]>([]);
   const [favoriteStatus, setFavoriteStatus] = useState<Record<string, "idle" | "saving" | "saved" | "error">>({});
   const [historyProduct, setHistoryProduct] = useState<{ id: string; title: string; currency: string } | null>(null);
+  const [trackedSort, setTrackedSort] = useState<"recent" | "savings">("recent");
 
   const retailerSlugById = useMemo(() => Object.fromEntries(retailers.map((r) => [r.id, r.slug])), [retailers]);
 
@@ -471,6 +602,51 @@ export function ProductBrowser({
       .catch((err: unknown) => console.error(err));
   }
 
+  function applyPatch(productId: string, body: Record<string, unknown>) {
+    return fetch("/api/favorite", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ productId, ...body }),
+    }).then((res) => res.json() as Promise<{ product?: Product; error?: string }>);
+  }
+
+  function applyUpdatedProducts(results: { product?: Product; error?: string }[]) {
+    const updated = results.filter((r): r is { product: Product } => !!r.product);
+    if (updated.length === 0) return;
+    setProducts((prev) => {
+      const byId = new Map(prev.map((p) => [p.id, p]));
+      for (const { product } of updated) byId.set(product.id, product);
+      return Array.from(byId.values());
+    });
+  }
+
+  // Un-does an accidental/wrong grouping for one retailer row without
+  // touching the rest of the group -- founder-requested, 2026-07-18.
+  function ungroupProduct(product: Product) {
+    applyPatch(product.id, { groupKey: null })
+      .then((data) => applyUpdatedProducts([data]))
+      .catch((err: unknown) => console.error(err));
+  }
+
+  // Moves every item in the current group into another existing group --
+  // founder-requested, 2026-07-18, for when the automatic query-based
+  // grouping missed that two separately-searched items are the same
+  // product.
+  function mergeGroupInto(sourceItems: Product[], targetGroupKey: string) {
+    Promise.all(sourceItems.map((p) => applyPatch(p.id, { groupKey: targetGroupKey })))
+      .then(applyUpdatedProducts)
+      .catch((err: unknown) => console.error(err));
+  }
+
+  // Renames a group's display title -- stored on every item in the group
+  // (redundant but simple) so any of them can supply it on the next render,
+  // founder-requested, 2026-07-18.
+  function renameGroup(items: Product[], title: string) {
+    Promise.all(items.map((p) => applyPatch(p.id, { groupTitle: title })))
+      .then(applyUpdatedProducts)
+      .catch((err: unknown) => console.error(err));
+  }
+
   // Lets a live-result row show a history icon the moment it's tracked,
   // without a page reload -- favorite() already prepends the new row to
   // `products`, so this just needs to stay in sync with that.
@@ -484,7 +660,10 @@ export function ProductBrowser({
   // `favorite()`), falling back to the product's own id so anything without
   // a group_key (favorited before this feature, or favorited alone) still
   // renders as its own single-item group. Sorted cheapest-first within a
-  // group so `items[0]` is always the hero/cheapest for display.
+  // group so `items[0]` is always the hero/cheapest for display. `title`
+  // resolves the same custom-title-else-hero-title logic the card itself
+  // uses, so the merge picker (built from this) shows the same name the
+  // card does.
   const trackedGroups = useMemo(() => {
     const map = new Map<string, Product[]>();
     for (const product of products) {
@@ -494,11 +673,20 @@ export function ProductBrowser({
       if (list) list.push(product);
       else map.set(key, [product]);
     }
-    return Array.from(map.entries()).map(([key, items]) => ({
-      key,
-      items: [...items].sort((a, b) => (a.current_price ?? Infinity) - (b.current_price ?? Infinity)),
-    }));
+    return Array.from(map.entries()).map(([key, items]) => {
+      const sorted = [...items].sort((a, b) => (a.current_price ?? Infinity) - (b.current_price ?? Infinity));
+      const customTitle = sorted.map((p) => (p.specs as { group_title?: string } | null)?.group_title).find((t) => !!t);
+      return { key, items: sorted, title: customTitle || sorted[0]!.title_en };
+    });
   }, [products]);
+
+  // "Biggest gap" sort (founder-requested, 2026-07-18): surfaces the
+  // products where picking the right store saves the most, instead of
+  // always ordering by most-recently-favorited.
+  const sortedTrackedGroups = useMemo(() => {
+    if (trackedSort === "recent") return trackedGroups;
+    return [...trackedGroups].sort((a, b) => groupSavings(b.items) - groupSavings(a.items));
+  }, [trackedGroups, trackedSort]);
 
   return (
     <div>
@@ -569,20 +757,51 @@ export function ProductBrowser({
       )}
 
       <div className="mt-8">
-        {trackedGroups.length > 0 && <SectionLabel>Tracked / متابَع</SectionLabel>}
-        <div className="mt-4 grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
-          {trackedGroups.map((group) => (
-            <TrackedProductGroupCard
-              key={group.key}
-              items={group.items}
-              retailerSlugById={retailerSlugById}
-              onShowHistory={(product) =>
-                setHistoryProduct({ id: product.id, title: product.title_en, currency: product.currency })
-              }
-              onRemove={removeProduct}
-            />
-          ))}
-        </div>
+        {trackedGroups.length > 0 && (
+          <div className="flex items-center justify-between gap-2">
+            <SectionLabel>Tracked / متابَع</SectionLabel>
+            <div className="flex items-center gap-1 rounded-full bg-gray-100 p-0.5 text-[11px] font-medium dark:bg-white/5">
+              {(["recent", "savings"] as const).map((mode) => (
+                <button
+                  key={mode}
+                  type="button"
+                  onClick={() => setTrackedSort(mode)}
+                  className={`rounded-full px-2.5 py-1 transition ${
+                    trackedSort === mode
+                      ? "bg-white text-gray-900 shadow-sm dark:bg-white/10 dark:text-white"
+                      : "text-gray-500 hover:text-gray-700 dark:text-white/40 dark:hover:text-white/70"
+                  }`}
+                >
+                  {mode === "recent" ? "Recent / الأحدث" : "Biggest gap / أكبر فرق"}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {trackedGroups.length === 0 ? (
+          <p className="mt-4 rounded-2xl border border-dashed border-gray-200 px-4 py-10 text-center text-sm text-gray-400 dark:border-white/10 dark:text-white/30">
+            Nothing tracked yet — search above and tap the star to start. / ولا شي متابَع لسا — ابحث فوق واضغط النجمة عشان تبدأ.
+          </p>
+        ) : (
+          <div className="mt-4 grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
+            {sortedTrackedGroups.map((group) => (
+              <TrackedProductGroupCard
+                key={group.key}
+                items={group.items}
+                retailerSlugById={retailerSlugById}
+                otherGroups={trackedGroups.filter((g) => g.key !== group.key).map((g) => ({ key: g.key, title: g.title }))}
+                onShowHistory={(product) =>
+                  setHistoryProduct({ id: product.id, title: product.title_en, currency: product.currency })
+                }
+                onRemove={removeProduct}
+                onUngroup={ungroupProduct}
+                onMerge={(targetGroupKey) => mergeGroupInto(group.items, targetGroupKey)}
+                onRename={(title) => renameGroup(group.items, title)}
+              />
+            ))}
+          </div>
+        )}
       </div>
 
       {historyProduct && (
