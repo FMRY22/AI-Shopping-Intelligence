@@ -1,0 +1,82 @@
+name: Smoke test favorite PATCH (merge/split/rename)
+on:
+  workflow_dispatch:
+
+jobs:
+  smoke-test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: POST /api/favorite to create a test product
+        id: post
+        run: |
+          set -e
+          UNIQUE="smoke-patch-$(date +%s)"
+          BODY=$(curl -sS -X POST "https://ai-shopping-intelligence-seven.vercel.app/api/favorite" \
+            -H "Content-Type: application/json" \
+            -d "{\"retailerSlug\":\"jarir\",\"url\":\"https://www.jarir.com/sa-en/${UNIQUE}.html\",\"title\":\"Smoke Patch Product ${UNIQUE}\",\"price\":99.99,\"currency\":\"SAR\",\"imageUrl\":null}")
+          echo "Response: $BODY"
+          PRODUCT_ID=$(echo "$BODY" | node -e "let d='';process.stdin.on('data',c=>d+=c);process.stdin.on('end',()=>{const j=JSON.parse(d);if(!j.product||!j.product.id)throw new Error('no product.id: '+d);console.log(j.product.id);});")
+          echo "product_id=$PRODUCT_ID" >> "$GITHUB_OUTPUT"
+          echo "PASS: created product_id=$PRODUCT_ID"
+
+      - name: PATCH groupTitle
+        run: |
+          set -e
+          PRODUCT_ID="${{ steps.post.outputs.product_id }}"
+          RESP=$(curl -sS -X PATCH "https://ai-shopping-intelligence-seven.vercel.app/api/favorite" \
+            -H "Content-Type: application/json" \
+            -d "{\"productId\":\"${PRODUCT_ID}\",\"groupTitle\":\"Smoke Test Group Title\"}")
+          echo "Response: $RESP"
+          TITLE=$(echo "$RESP" | node -e "let d='';process.stdin.on('data',c=>d+=c);process.stdin.on('end',()=>{const j=JSON.parse(d);console.log((j.product&&j.product.specs&&j.product.specs.group_title)||'MISSING');});")
+          if [ "$TITLE" != "Smoke Test Group Title" ]; then
+            echo "::error::group_title was not persisted correctly (got: $TITLE)"
+            exit 1
+          fi
+          echo "PASS: group_title persisted correctly"
+
+      - name: PATCH groupKey (merge)
+        run: |
+          set -e
+          PRODUCT_ID="${{ steps.post.outputs.product_id }}"
+          RESP=$(curl -sS -X PATCH "https://ai-shopping-intelligence-seven.vercel.app/api/favorite" \
+            -H "Content-Type: application/json" \
+            -d "{\"productId\":\"${PRODUCT_ID}\",\"groupKey\":\"smoke-test-merged-group\"}")
+          echo "Response: $RESP"
+          KEY=$(echo "$RESP" | node -e "let d='';process.stdin.on('data',c=>d+=c);process.stdin.on('end',()=>{const j=JSON.parse(d);console.log((j.product&&j.product.specs&&j.product.specs.group_key)||'MISSING');});")
+          TITLE_STILL_THERE=$(echo "$RESP" | node -e "let d='';process.stdin.on('data',c=>d+=c);process.stdin.on('end',()=>{const j=JSON.parse(d);console.log((j.product&&j.product.specs&&j.product.specs.group_title)||'MISSING');});")
+          if [ "$KEY" != "smoke-test-merged-group" ]; then
+            echo "::error::group_key was not persisted correctly (got: $KEY)"
+            exit 1
+          fi
+          if [ "$TITLE_STILL_THERE" != "Smoke Test Group Title" ]; then
+            echo "::error::a partial PATCH clobbered group_title instead of merging specs (got: $TITLE_STILL_THERE)"
+            exit 1
+          fi
+          echo "PASS: group_key persisted, and group_title survived the partial update (specs merge, not overwrite)"
+
+      - name: PATCH groupKey null (split)
+        run: |
+          set -e
+          PRODUCT_ID="${{ steps.post.outputs.product_id }}"
+          RESP=$(curl -sS -X PATCH "https://ai-shopping-intelligence-seven.vercel.app/api/favorite" \
+            -H "Content-Type: application/json" \
+            -d "{\"productId\":\"${PRODUCT_ID}\",\"groupKey\":null}")
+          echo "Response: $RESP"
+          KEY=$(echo "$RESP" | node -e "let d='';process.stdin.on('data',c=>d+=c);process.stdin.on('end',()=>{const j=JSON.parse(d);console.log((j.product&&j.product.specs&&j.product.specs.group_key)||'CLEARED');});")
+          if [ "$KEY" != "CLEARED" ]; then
+            echo "::error::group_key was not cleared by null (got: $KEY)"
+            exit 1
+          fi
+          echo "PASS: group_key cleared correctly (split)"
+
+      - name: Clean up -- delete the test product
+        if: always()
+        run: |
+          PRODUCT_ID="${{ steps.post.outputs.product_id }}"
+          if [ -z "$PRODUCT_ID" ]; then
+            echo "No product_id captured, nothing to delete"
+            exit 0
+          fi
+          HTTP_CODE=$(curl -sS -o /tmp/delete_resp.json -w "%{http_code}" -X DELETE "https://ai-shopping-intelligence-seven.vercel.app/api/favorite?productId=${PRODUCT_ID}")
+          echo "Delete HTTP status: $HTTP_CODE"
+          cat /tmp/delete_resp.json
