@@ -267,7 +267,7 @@ export function ProductDetail({
       <div className="mt-6 rounded-2xl border border-gray-100 bg-white p-5 dark:border-white/10 dark:bg-white/[0.03]">
         {mergedHistory.length >= 2 && <BuyWaitBanner signal={computeBuyWaitSignal(mergedHistory)} />}
         <div className={mergedHistory.length >= 2 ? "mt-4" : ""}>
-          <PriceChart points={mergedHistory} />
+          <PriceChart points={mergedHistory} currency={hero?.currency ?? "SAR"} />
         </div>
         {mergedHistory.length >= 2 && (
           <div className="mt-4">
