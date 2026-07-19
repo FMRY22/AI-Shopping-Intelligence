@@ -1,0 +1,45 @@
+name: diag-noon-reachability
+
+# Throwaway diagnostic: an honest, passive check of whether noon.com is
+# reachable at all with a plain HTTP request (no browser, no spoofed
+# fingerprint, no proxy) from a GitHub Actions runner, and what its
+# robots.txt says. Playwright navigation to noon.com already times out
+# 100% of the time from this runner network (see worker-noon.yml's
+# comment) -- this checks whether that's specific to full-browser
+# navigation or blocks plain HTTP too, and separately whether robots.txt
+# permits automated access at all before any further investigation.
+# Remove once done.
+on:
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: robots.txt
+        run: |
+          echo "=== robots.txt ==="
+          curl -sS -A "Mozilla/5.0 (compatible; price-tracker-personal-project)" \
+            --max-time 20 -w "\nHTTP_STATUS:%{http_code}\n" \
+            "https://www.noon.com/robots.txt" || echo "(request failed)"
+
+      - name: homepage (honest GET, standard UA)
+        run: |
+          echo "=== homepage ==="
+          curl -sS -A "Mozilla/5.0 (compatible; price-tracker-personal-project)" \
+            --max-time 20 -w "\nHTTP_STATUS:%{http_code}\n" \
+            "https://www.noon.com/saudi-en/" -o homepage.html -D headers.txt || echo "(request failed)"
+          echo "--- response headers ---"
+          cat headers.txt 2>/dev/null || echo "(none)"
+          echo "--- first 2000 chars of body ---"
+          head -c 2000 homepage.html 2>/dev/null || echo "(none)"
+
+      - name: known product URL (same one worker-noon times out on)
+        run: |
+          echo "=== product page ==="
+          curl -sS -A "Mozilla/5.0 (compatible; price-tracker-personal-project)" \
+            --max-time 20 -w "\nHTTP_STATUS:%{http_code}\n" \
+            "https://www.noon.com/saudi-en/N70022739V/p/" -o product.html || echo "(request failed)"
+          echo "--- first 1000 chars of body ---"
+          head -c 1000 product.html 2>/dev/null || echo "(none)"
