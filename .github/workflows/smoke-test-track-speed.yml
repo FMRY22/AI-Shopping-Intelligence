@@ -1,0 +1,32 @@
+name: Smoke test live search speed
+on:
+  workflow_dispatch:
+
+jobs:
+  smoke-test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Time POST /api/track and inspect retailers in the response
+        run: |
+          set -e
+          RESP_FILE=$(mktemp)
+          ELAPSED=$(curl -sS -o "$RESP_FILE" -w "%{time_total}" -X POST "https://ai-shopping-intelligence-seven.vercel.app/api/track" \
+            -H "Content-Type: application/json" \
+            -d '{"query":"iphone"}')
+          echo "Elapsed seconds: $ELAPSED"
+          echo "--- Response ---"
+          cat "$RESP_FILE"
+          echo ""
+          node -e "
+            const fs = require('fs');
+            const body = JSON.parse(fs.readFileSync('$RESP_FILE', 'utf8'));
+            const results = body.results || [];
+            const retailers = [...new Set(results.map((r) => r.retailerSlug))];
+            console.log('Retailers present:', retailers);
+            console.log('Total results:', results.length);
+            console.log('partialErrors:', JSON.stringify(body.partialErrors || null));
+            if (retailers.includes('extra')) {
+              console.error('FAIL: extra should no longer appear in live search results');
+              process.exit(1);
+            }
+          "
