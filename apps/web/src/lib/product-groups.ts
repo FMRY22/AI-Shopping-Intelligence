@@ -70,7 +70,12 @@ export function groupProducts(products: Product[]): ProductGroup[] {
 // the two products share zero real product-identity words. STOPWORDS
 // strips that retailer/regional metadata before comparing -- it was never
 // signal about which PRODUCT this is, only about warranty terms and which
-// region's edition it's listed for.
+// region's edition it's listed for. "version" itself is in the list too --
+// caught in a follow-up dry run (this time run without writes first, after
+// the production incident above) still matching "Nintendo Switch 2 +
+// Mario Kart Bundle" against an unrelated "Nintendo Switch (OLED)" listing
+// at exactly the threshold, purely because both titles end in "... Version"
+// even without a shared region qualifier.
 const OVERLAP_THRESHOLD = 0.5;
 
 // Canonicalizes retailer-specific abbreviations to a shared spelling before
@@ -92,7 +97,7 @@ const TOKEN_SYNONYMS: Record<string, string> = { generation: "gen", dig: "digita
 // handedly drag two different products' overlap score above the threshold
 // (see round 3 above).
 const STOPWORDS = new Set([
-  "warranty", "manufacturer", "year", "years", "ksa", "international", "intl", "global", "gcc", "console",
+  "warranty", "manufacturer", "year", "years", "ksa", "international", "intl", "global", "gcc", "console", "version",
 ]);
 
 function preprocessTitle(title: string): string {
