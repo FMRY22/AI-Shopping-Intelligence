@@ -207,6 +207,22 @@ function hasConflictingDistinguishingWord(tokensA: Set<string>, tokensB: Set<str
   return DISTINGUISHING_WORDS.some((word) => tokensA.has(word) !== tokensB.has(word));
 }
 
+// Amazon titles follow "Product Name: feature1, feature2, ..." (e.g. "Apple
+// iPhone 17 256 GB: 6.3-inch Display..., Center Stage Front Camera...");
+// Jarir/other retailers just list attributes with no marketing copy. Live
+// production data (2026-07-19, iPhone 17 search) caught this splitting the
+// SAME retailer listing from itself across a merge -- an Amazon iPhone 17
+// title mentions "Camera" as a feature bullet, which sits in
+// DISTINGUISHING_WORDS to catch "Galaxy Buds" vs "Galaxy Watch" (different
+// product lines), so a terser competing title that doesn't happen to repeat
+// the word "camera" was wrongly treated as a different product. Restricting
+// the distinguishing-word check to the text before the first colon keeps it
+// scoped to the actual product name, not feature-bullet prose.
+function productNamePortion(title: string): string {
+  const colonIndex = title.indexOf(":");
+  return colonIndex === -1 ? title : title.slice(0, colonIndex);
+}
+
 // The overlap-coefficient false-positive risk applies to bare model/
 // generation numbers too ("iPhone 15" vs "iPhone 14" share "iphone" and
 // disagree on almost nothing else). Neither the size check (no unit
@@ -247,7 +263,9 @@ function isSameProduct(a: string, b: string): boolean {
   const tokensA = normalizeTitleTokens(a);
   const tokensB = normalizeTitleTokens(b);
   if (hasConflictingModelCode(tokensA, tokensB)) return false;
-  if (hasConflictingDistinguishingWord(tokensA, tokensB)) return false;
+  const nameTokensA = normalizeTitleTokens(productNamePortion(a));
+  const nameTokensB = normalizeTitleTokens(productNamePortion(b));
+  if (hasConflictingDistinguishingWord(nameTokensA, nameTokensB)) return false;
   if (hasConflictingKeywordGroup(tokensA, tokensB)) return false;
   if (hasConflictingBareNumbers(tokensA, tokensB)) return false;
   return titleSimilarity(a, b) >= OVERLAP_THRESHOLD;
