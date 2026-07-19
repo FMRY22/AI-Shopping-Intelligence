@@ -14,8 +14,8 @@ jobs:
     steps:
       - name: Try queries
         run: |
-          for q in "iphone" "iphon" "ايفون" "iphone 17" "17" "sasmung" "samsung"; do
-            echo "=== query: $q ==="
+          for q in "" "iphone" "iphon" "ايفون" "iphone 17" "17" "sasmung" "samsung" "playstation" "ps5" "sony"; do
+            echo "=== query: [$q] ==="
             curl -sS -G "https://eshopping-ai.vercel.app/api/search" \
               --data-urlencode "q=$q" \
               --max-time 30 > out.json
