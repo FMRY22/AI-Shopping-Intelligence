@@ -265,3 +265,45 @@ export function findMatchingGroupKey(title: string, existing: Product[]): string
   }
   return null;
 }
+
+// Used on live (not-yet-tracked) search results -- founder feedback
+// (2026-07-19): typing "iPhone 16" showed everything (16, 16 Pro, 16 Pro
+// Max, different colors/storage across retailers) crammed into one
+// comparison card, as if they were all the same product at different
+// prices. That assumption held for a specific-SKU query ("PS5 digital
+// edition") but not a broad one -- a live search's results were never
+// guaranteed to be one product, only "whatever matched the query text."
+// Clusters raw titles with the same same-product logic used everywhere
+// else (union-find over isSameProduct, order-independent), so the caller
+// can render one comparison card per actual distinct product instead of
+// assuming there's only ever one.
+export function clusterTitles(titles: string[]): number[][] {
+  const parent = titles.map((_, index) => index);
+  function find(x: number): number {
+    while (parent[x] !== x) {
+      parent[x] = parent[parent[x]!]!;
+      x = parent[x]!;
+    }
+    return x;
+  }
+  function union(x: number, y: number) {
+    const rootX = find(x);
+    const rootY = find(y);
+    if (rootX !== rootY) parent[rootX] = rootY;
+  }
+
+  for (let i = 0; i < titles.length; i++) {
+    for (let j = i + 1; j < titles.length; j++) {
+      if (isSameProduct(titles[i]!, titles[j]!)) union(i, j);
+    }
+  }
+
+  const clusters = new Map<number, number[]>();
+  for (let i = 0; i < titles.length; i++) {
+    const root = find(i);
+    const list = clusters.get(root);
+    if (list) list.push(i);
+    else clusters.set(root, [i]);
+  }
+  return Array.from(clusters.values());
+}

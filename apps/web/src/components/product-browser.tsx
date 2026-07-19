@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import type { Product, Retailer } from "@repo/database";
-import { findMatchingGroupKey, groupProducts } from "@/lib/product-groups";
+import { clusterTitles, findMatchingGroupKey, groupProducts } from "@/lib/product-groups";
 
 interface LiveResult {
   retailerSlug: string;
@@ -339,7 +339,12 @@ export function ProductBrowser({
   const [isTracking, setIsTracking] = useState(false);
   const [trackError, setTrackError] = useState<string | null>(null);
   const [liveResults, setLiveResults] = useState<LiveResult[]>([]);
-  const [liveFavoriteStatus, setLiveFavoriteStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
+  // Keyed by cluster index (see liveResultClusters below), not a single
+  // flag -- a broad query can surface several distinct products, each with
+  // its own independent track button and save state.
+  const [liveFavoriteStatusByCluster, setLiveFavoriteStatusByCluster] = useState<
+    Record<number, "idle" | "saving" | "saved" | "error">
+  >({});
   const [trackedSort, setTrackedSort] = useState<"recent" | "savings">("recent");
 
   const retailerSlugById = useMemo(() => Object.fromEntries(retailers.map((r) => [r.id, r.slug])), [retailers]);
@@ -377,7 +382,7 @@ export function ProductBrowser({
     setIsTracking(true);
     setTrackError(null);
     setLiveResults([]);
-    setLiveFavoriteStatus("idle");
+    setLiveFavoriteStatusByCluster({});
     fetch("/api/track", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -395,10 +400,13 @@ export function ProductBrowser({
       .finally(() => setIsTracking(false));
   }
 
-  // Tracks every retailer currently shown for this product at once, not one
-  // at a time -- founder feedback (2026-07-18): "it's supposed to be
-  // search -- if I favorite it, it favorites the product; the retailer is
-  // just where to buy it."
+  // Tracks every retailer currently shown for ONE product cluster at once,
+  // not one at a time -- founder feedback (2026-07-18): "it's supposed to
+  // be search -- if I favorite it, it favorites the product; the retailer
+  // is just where to buy it." `results` is always a single cluster from
+  // liveResultClusters below, never the whole live-results list -- a broad
+  // query ("iPhone 16") can surface several distinct products, and each
+  // gets its own independent track action.
   //
   // Each result's group_key is resolved independently: first, check whether
   // its title actually matches something already tracked (findMatchingGroupKey
@@ -406,12 +414,17 @@ export function ProductBrowser({
   // لازم تصنف بذكائك حسب المواصفات," a product surely sells in more than one
   // place, classify it smartly by spec) so favoriting it from a *different*
   // search than the one that first tracked it still lands in the same group.
-  // Only falls back to the normalized-query key when nothing existing
-  // matches, which is also what keeps multiple genuinely-new results from
-  // this same search grouped with each other.
-  function favoriteAll(results: LiveResult[]) {
-    const fallbackGroupKey = query.trim().toLowerCase().replace(/\s+/g, " ");
-    setLiveFavoriteStatus("saving");
+  // The fallback (nothing existing matches) is derived from the cluster's
+  // own title, not the raw search query -- results within one cluster are
+  // already confirmed the same product by clusterTitles, so any one of
+  // their titles is a valid shared key, and a DIFFERENT cluster from the
+  // same search naturally gets a different fallback key instead of the
+  // same one (the bug this cluster-per-product split fixes in the first
+  // place: everything from one search sharing a `query`-based key).
+  function favoriteAll(results: LiveResult[], clusterIndex: number) {
+    if (results.length === 0) return;
+    const fallbackGroupKey = results[0]!.title.trim().toLowerCase().replace(/\s+/g, " ");
+    setLiveFavoriteStatusByCluster((prev) => ({ ...prev, [clusterIndex]: "saving" }));
     Promise.all(
       results.map((result) => {
         const groupKey = findMatchingGroupKey(result.title, products) ?? fallbackGroupKey;
@@ -424,7 +437,10 @@ export function ProductBrowser({
     )
       .then((responses) => {
         const succeeded = responses.filter((r): r is { product: Product } => !!r.product);
-        setLiveFavoriteStatus(succeeded.length === results.length ? "saved" : "error");
+        setLiveFavoriteStatusByCluster((prev) => ({
+          ...prev,
+          [clusterIndex]: succeeded.length === results.length ? "saved" : "error",
+        }));
         if (succeeded.length === 0) return;
         setProducts((prev) => {
           const byId = new Map(prev.map((p) => [p.id, p]));
@@ -432,7 +448,7 @@ export function ProductBrowser({
           return Array.from(byId.values());
         });
       })
-      .catch(() => setLiveFavoriteStatus("error"));
+      .catch(() => setLiveFavoriteStatusByCluster((prev) => ({ ...prev, [clusterIndex]: "error" })));
   }
 
   // Lets a live-result row link straight to the detail page the moment
@@ -443,6 +459,18 @@ export function ProductBrowser({
     for (const p of products) map[p.url] = p;
     return map;
   }, [products]);
+
+  // A broad query ("iPhone 16") can match several genuinely different
+  // products (16, 16 Pro, 16 Pro Max, ...) across retailers -- founder
+  // feedback (2026-07-19): "لما كتبت iPhone 16 موب جالس يعطيني بحث كامل
+  // جالس يعرض لي منتج واحد" (typing iPhone 16 doesn't give me a full
+  // search, it shows me one product). Reusing the same matching logic that
+  // groups tracked products (product-groups.ts) instead of assuming every
+  // live search is for one specific product.
+  const liveResultClusters = useMemo(() => {
+    const indexGroups = clusterTitles(liveResults.map((r) => r.title));
+    return indexGroups.map((indexes) => indexes.map((i) => liveResults[i]!));
+  }, [liveResults]);
 
   const trackedGroups = useMemo(() => groupProducts(products), [products]);
 
@@ -509,12 +537,15 @@ export function ProductBrowser({
         <div className="mt-8">
           <SectionLabel>Live results — tap Track to follow / نتائج حية — اضغط تابع للمتابعة</SectionLabel>
           <div className="mt-4 grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
-            <LiveResultGroupCard
-              results={[...liveResults].sort((a, b) => a.price - b.price)}
-              status={liveFavoriteStatus}
-              onTrackAll={() => favoriteAll(liveResults)}
-              trackedByUrl={trackedByUrl}
-            />
+            {liveResultClusters.map((cluster, clusterIndex) => (
+              <LiveResultGroupCard
+                key={cluster[0]!.url}
+                results={[...cluster].sort((a, b) => a.price - b.price)}
+                status={liveFavoriteStatusByCluster[clusterIndex] ?? "idle"}
+                onTrackAll={() => favoriteAll(cluster, clusterIndex)}
+                trackedByUrl={trackedByUrl}
+              />
+            ))}
           </div>
         </div>
       )}
