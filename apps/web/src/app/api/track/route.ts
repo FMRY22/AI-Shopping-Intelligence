@@ -63,6 +63,13 @@ interface RetailerSearchConfig {
   imageSelectors: string[];
 }
 
+// extra is deliberately absent from live search (see EXTRA_CONFIG_REFERENCE
+// below for why) -- founder feedback (2026-07-19): a live search took ~30s,
+// and extra's guaranteed-to-fail Cloudflare wait (CARD_WAIT_TIMEOUT_MS plus
+// 3 fallback selectors at 2s each = up to ~21s) for zero results every
+// single time was most of that budget. Its own scheduled background worker
+// (workers/extra, worker-extra.yml) still updates already-tracked extra
+// prices independently -- this only affects the live "search anything" path.
 const RETAILER_CONFIGS: RetailerSearchConfig[] = [
   {
     slug: "amazon_sa",
@@ -82,30 +89,11 @@ const RETAILER_CONFIGS: RetailerSearchConfig[] = [
     priceSelectors: [".a-price .a-offscreen", ".a-price"],
     imageSelectors: ["img.s-image", "img"],
   },
-  {
-    slug: "extra",
-    searchUrl: (q) => `https://www.extra.com/en-sa/search/?q=${encodeURIComponent(q)}`,
-    // Cloudflare's bot-detection serves our headless browser a challenge
-    // page ("Attention Required") on this exact URL, confirmed 2026-07-17
-    // by comparing a plain curl request (200, no challenge) against the
-    // live Playwright run (challenge page, 0 items) -- it's fingerprinting
-    // the automated browser specifically, not blocking the route/IP in
-    // general. Not chasing this with stealth/fingerprint-spoofing
-    // techniques; these selectors are unverified guesses that will simply
-    // find nothing until/unless that changes, same safe-failure outcome
-    // as jarir below.
-    cardSelectors: [
-      "[data-testid='product-card']",
-      "[data-testid*='product']",
-      "div[class*='product-card']",
-      "li[class*='product']",
-    ],
-    linkSelectors: ["a[href*='/p/']", "a[href]"],
-    titleSelectors: ["[data-testid='product-title']", "h3", "[class*='product-name']"],
-    priceSelectors: ["[data-testid='product-price']", '[itemprop="price"]', '[class*="price"]'],
-    imageSelectors: ["img"],
-  },
 ];
+
+// extra's config (Cloudflare-blocked, see the comment above RETAILER_CONFIGS)
+// used to live here as a RetailerSearchConfig object -- see git history
+// (commit around 2026-07-17's Jarir/extra selector work) if reviving it.
 
 async function textFromFirstMatchIn(scope: Locator, selectors: string[]): Promise<string | null> {
   for (const selector of selectors) {
@@ -305,41 +293,72 @@ export async function POST(request: Request): Promise<NextResponse> {
   if (!query) {
     return NextResponse.json({ error: "query is required" }, { status: 400 });
   }
+  // Narrowed into a new const: `query`'s string-vs-undefined narrowing above
+  // doesn't persist into the closures below (runJarir/runBrowserRetailers),
+  // since TS can't prove a nested function runs before any later reassignment.
+  const searchQuery: string = query;
 
   const summary: { retailer: string; status: "fulfilled" | "rejected"; found: number; reason?: string }[] = [];
   const liveResults: LiveSearchResult[] = [];
 
-  // A plain HTTP call, done before spinning up any browser.
-  try {
-    const jarirResults = await searchJarirViaApi(query);
-    liveResults.push(...jarirResults);
-    summary.push({ retailer: "jarir", status: "fulfilled", found: jarirResults.length });
-  } catch (err) {
-    summary.push({ retailer: "jarir", status: "rejected", found: 0, reason: err instanceof Error ? err.message : String(err) });
+  interface RetailerOutcome {
+    retailer: string;
+    status: "fulfilled" | "rejected";
+    found: number;
+    reason?: string;
+    results: LiveSearchResult[];
   }
 
-  // Sequential, each with its own browser (see searchRetailer's comment).
-  for (const config of RETAILER_CONFIGS) {
+  // A plain HTTP call -- no browser, so it's safe to run at the same time
+  // as the Playwright loop below rather than waiting for it to finish
+  // first (founder feedback, 2026-07-19: a live search took ~30s; this and
+  // dropping extra above together bring a typical search down to roughly
+  // however long amazon_sa's own browser search takes, since that's now
+  // the only thing left in the critical path).
+  async function runJarir(): Promise<RetailerOutcome> {
     try {
-      const found = await searchRetailer(config, query);
-      let count = 0;
-      for (const item of found) {
-        const parsed = item.priceText ? parsePrice(item.priceText) : null;
-        if (!parsed) continue;
-        liveResults.push({
-          retailerSlug: config.slug,
-          url: item.url,
-          title: item.title,
-          price: parsed.amount,
-          currency: parsed.currency,
-          imageUrl: item.imageUrl,
-        });
-        count++;
-      }
-      summary.push({ retailer: config.slug, status: "fulfilled", found: count });
+      const results = await searchJarirViaApi(searchQuery);
+      return { retailer: "jarir", status: "fulfilled", found: results.length, results };
     } catch (err) {
-      summary.push({ retailer: config.slug, status: "rejected", found: 0, reason: err instanceof Error ? err.message : String(err) });
+      return { retailer: "jarir", status: "rejected", found: 0, reason: err instanceof Error ? err.message : String(err), results: [] };
     }
+  }
+
+  // Retailers in this loop stay sequential AMONG THEMSELVES, each with its
+  // own browser (see searchRetailer's comment on why reusing one browser
+  // across retailers isn't reliable) -- but the whole loop runs concurrently
+  // with runJarir() above via Promise.all below, since Jarir never touches
+  // Playwright and so shares no browser state with it.
+  async function runBrowserRetailers(): Promise<RetailerOutcome[]> {
+    const outcomes: RetailerOutcome[] = [];
+    for (const config of RETAILER_CONFIGS) {
+      try {
+        const found = await searchRetailer(config, searchQuery);
+        const results: LiveSearchResult[] = [];
+        for (const item of found) {
+          const parsed = item.priceText ? parsePrice(item.priceText) : null;
+          if (!parsed) continue;
+          results.push({
+            retailerSlug: config.slug,
+            url: item.url,
+            title: item.title,
+            price: parsed.amount,
+            currency: parsed.currency,
+            imageUrl: item.imageUrl,
+          });
+        }
+        outcomes.push({ retailer: config.slug, status: "fulfilled", found: results.length, results });
+      } catch (err) {
+        outcomes.push({ retailer: config.slug, status: "rejected", found: 0, reason: err instanceof Error ? err.message : String(err), results: [] });
+      }
+    }
+    return outcomes;
+  }
+
+  const [jarirOutcome, browserOutcomes] = await Promise.all([runJarir(), runBrowserRetailers()]);
+  for (const outcome of [jarirOutcome, ...browserOutcomes]) {
+    liveResults.push(...outcome.results);
+    summary.push({ retailer: outcome.retailer, status: outcome.status, found: outcome.found, ...(outcome.reason ? { reason: outcome.reason } : {}) });
   }
 
   const errors = summary.filter((s) => s.status === "rejected").map((s) => `${s.retailer}: ${s.reason}`);
