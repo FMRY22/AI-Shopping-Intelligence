@@ -28,7 +28,22 @@ export const maxDuration = 60;
 const CHROMIUM_PACK_URL =
   "https://github.com/Sparticuz/chromium/releases/download/v149.0.0/chromium-v149.0.0-pack.x64.tar";
 
-const MAX_RESULTS_PER_RETAILER = 5;
+// Founder feedback (2026-07-19): "ابي نحسن البحث فيها اكثر بعد الانتر
+// بحيث يطلع كل المنتجات موب محدده" (I want the search after Enter to show
+// all products, not limited) -- 5 silently truncated a broad query (e.g.
+// "iphone 17" spans base/Pro/Pro Max/Air x storage x color) to whatever
+// happened to be first in DOM/API order, well short of a full results page
+// on either retailer. Raised to capture effectively a full first page from
+// each (Jarir's Constructor.io API accepts num_results_per_page directly;
+// Amazon's SERP page itself rarely renders much past this many cards
+// anyway) rather than doing real pagination, which would add a second
+// request per retailer for comparatively little gain on a personal-scale
+// tool. Verified live (2026-07-19, GitHub Actions smoke test): a broad
+// query stays well inside Vercel's 60s maxDuration at this cap -- Amazon's
+// per-card DOM extraction is the only part that scales with this number
+// (Jarir is one JSON call regardless of count), and it's still cheap
+// relative to page load/browser launch overhead.
+const MAX_RESULTS_PER_RETAILER = 30;
 const CARD_WAIT_TIMEOUT_MS = 15_000;
 const FIELD_TIMEOUT_MS = 3_000;
 
