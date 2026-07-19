@@ -137,6 +137,45 @@ function StockPill({ inStock }: { inStock: boolean }) {
   );
 }
 
+// A price-drop/rise badge right on the card, not just after opening the
+// product -- founder feedback (2026-07-19): "تحسينات فنية وتصميمية" pointing
+// at global price-tracker sites, which all surface "did this just move"
+// straight in the list view (CamelCamelCamel/Keepa). Placed opposite the
+// stock pill so both can coexist on the same image without overlapping.
+// Flat/no-data cases render nothing rather than a "0%" badge -- a badge's
+// whole job is to draw the eye to something that changed.
+function PriceChangeBadge({ change }: { change?: { changePercent: number; direction: "up" | "down" | "flat" } }) {
+  if (!change || change.direction === "flat") return null;
+  const isDown = change.direction === "down";
+  return (
+    <span
+      className={`absolute right-2 top-2 inline-flex items-center gap-0.5 rounded-full px-2 py-0.5 text-[10px] font-bold shadow-sm backdrop-blur-sm ${
+        isDown ? "bg-emerald-500/90 text-white" : "bg-amber-500/90 text-white"
+      }`}
+    >
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={3} className={`h-2.5 w-2.5 ${isDown ? "" : "rotate-180"}`}>
+        <path d="M12 5v14M5 12l7 7 7-7" />
+      </svg>
+      {Math.abs(change.changePercent).toFixed(0)}%
+    </span>
+  );
+}
+
+// Pulsing placeholders shaped like a real card, shown while a live search
+// is in flight (~8s -- see api/track/route.ts) instead of a bare loading
+// sentence, so the layout the results will land in is visible immediately.
+function SkeletonCard() {
+  return (
+    <div className="flex animate-pulse flex-col overflow-hidden rounded-2xl border border-gray-100 bg-white p-3 dark:border-white/10 dark:bg-white/[0.03]">
+      <div className="aspect-square w-full rounded-lg bg-gray-100 dark:bg-white/5" />
+      <div className="mt-3 h-3.5 w-4/5 rounded bg-gray-100 dark:bg-white/5" />
+      <div className="mt-1.5 h-3.5 w-3/5 rounded bg-gray-100 dark:bg-white/5" />
+      <div className="mt-2.5 h-3 w-2/5 rounded bg-gray-100 dark:bg-white/5" />
+      <div className="mt-3 h-8 w-full rounded-full bg-gray-100 dark:bg-white/5" />
+    </div>
+  );
+}
+
 // A small icon-link on an already-tracked live-result row, straight to that
 // product's detail page -- founder feedback (2026-07-18): "اضغط عليها
 // بعدين يفتح لي صفحة فيها تراكر" (click it, then a page opens with a
@@ -215,9 +254,11 @@ function TrackAllButton({
 function TrackedProductGroupCard({
   group,
   retailerSlugById,
+  priceChange,
 }: {
   group: { key: string; items: Product[]; title: string };
   retailerSlugById: Record<string, string>;
+  priceChange?: { changePercent: number; direction: "up" | "down" | "flat" };
 }) {
   const hero = group.items[0]!;
   return (
@@ -228,6 +269,7 @@ function TrackedProductGroupCard({
       <div className="relative">
         <ProductImage src={hero.image_url} alt={group.title} />
         <StockPill inStock={group.items.some((p) => p.in_stock)} />
+        <PriceChangeBadge change={priceChange} />
       </div>
       <p className="mt-3 line-clamp-2 min-h-[2.5rem] text-sm font-medium text-gray-900 dark:text-white">{group.title}</p>
       <div className="mt-2 flex items-center justify-between gap-2">
@@ -299,6 +341,35 @@ function LiveResultGroupCard({
   );
 }
 
+function SummaryStrip({
+  trackedCount,
+  listingCount,
+  dropCount,
+}: {
+  trackedCount: number;
+  listingCount: number;
+  dropCount: number;
+}) {
+  return (
+    <div className="mb-6 grid grid-cols-3 gap-3 rounded-2xl border border-gray-100 bg-white p-4 dark:border-white/10 dark:bg-white/[0.03]">
+      <div>
+        <p className="text-xl font-bold text-gray-900 dark:text-white">{trackedCount}</p>
+        <p className="text-[11px] text-gray-400 dark:text-white/40">Tracked / متابَع</p>
+      </div>
+      <div>
+        <p className="text-xl font-bold text-gray-900 dark:text-white">{listingCount}</p>
+        <p className="text-[11px] text-gray-400 dark:text-white/40">Store listings / عروض متاجر</p>
+      </div>
+      <div>
+        <p className={`text-xl font-bold ${dropCount > 0 ? "text-emerald-600 dark:text-emerald-400" : "text-gray-900 dark:text-white"}`}>
+          {dropCount}
+        </p>
+        <p className="text-[11px] text-gray-400 dark:text-white/40">Price drops / انخفاض بالسعر</p>
+      </div>
+    </div>
+  );
+}
+
 function SectionLabel({ children }: { children: React.ReactNode }) {
   return (
     <p className="flex items-center gap-1.5 text-sm font-bold text-gray-900 dark:text-white">
@@ -346,8 +417,32 @@ export function ProductBrowser({
     Record<number, "idle" | "saving" | "saved" | "error">
   >({});
   const [trackedSort, setTrackedSort] = useState<"recent" | "savings">("recent");
+  const [priceChanges, setPriceChanges] = useState<Record<string, { changePercent: number; direction: "up" | "down" | "flat" }>>({});
 
   const retailerSlugById = useMemo(() => Object.fromEntries(retailers.map((r) => [r.id, r.slug])), [retailers]);
+
+  // Powers the price-drop/rise badge on each tracked card -- one batched
+  // request for everything currently shown, not one per card.
+  useEffect(() => {
+    const ids = products.map((p) => p.id);
+    if (ids.length === 0) {
+      setPriceChanges({});
+      return;
+    }
+    let cancelled = false;
+    fetch(`/api/price-changes?ids=${ids.map(encodeURIComponent).join(",")}`)
+      .then((res) => res.json() as Promise<{ changes?: typeof priceChanges }>)
+      .then((data) => {
+        if (!cancelled) setPriceChanges(data.changes ?? {});
+      })
+      .catch(() => {
+        if (!cancelled) setPriceChanges({});
+      });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [products.map((p) => p.id).join(",")]);
 
   useEffect(() => {
     const trimmed = query.trim();
@@ -482,6 +577,14 @@ export function ProductBrowser({
     return [...trackedGroups].sort((a, b) => groupSavings(b.items) - groupSavings(a.items));
   }, [trackedGroups, trackedSort]);
 
+  // A quick-glance dashboard strip, not just a bare grid -- founder
+  // feedback (2026-07-19) wanted the design to match global price-tracker
+  // sites, which open with a summary before the list itself.
+  const dropCount = useMemo(
+    () => trackedGroups.filter((g) => priceChanges[g.items[0]!.id]?.direction === "down").length,
+    [trackedGroups, priceChanges],
+  );
+
   return (
     <div>
       <p className="mb-4 text-sm text-gray-500 dark:text-white/40">
@@ -503,7 +606,7 @@ export function ProductBrowser({
             type="search"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search products... / ابحث عن منتج..."
+            placeholder="Search... / ابحث..."
             dir="auto"
             className="w-full rounded-full border border-gray-200 bg-white py-3.5 pl-11 pr-4 text-[15px] text-gray-900 shadow-sm outline-none transition placeholder:text-gray-400 focus:border-indigo-400 focus:ring-4 focus:ring-indigo-500/10 dark:border-white/10 dark:bg-white/5 dark:text-white dark:placeholder:text-white/30 dark:focus:border-indigo-400"
           />
@@ -520,9 +623,16 @@ export function ProductBrowser({
       {isSearching && <p className="mt-2 text-xs text-gray-400 dark:text-white/30">Checking your list…</p>}
 
       {isTracking && (
-        <p className="mt-6 text-center text-sm text-gray-500 dark:text-white/50">
-          Searching retailers live… (~30s) / جاري البحث الحي في المتاجر... (قد يأخذ ٣٠ ثانية)
-        </p>
+        <div className="mt-8">
+          <p className="text-center text-sm text-gray-500 dark:text-white/50">
+            Searching retailers live… / جاري البحث الحي في المتاجر...
+          </p>
+          <div className="mt-4 grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
+            {Array.from({ length: 4 }, (_, i) => (
+              <SkeletonCard key={i} />
+            ))}
+          </div>
+        </div>
       )}
 
       {trackError && <p className="mt-4 text-center text-sm text-red-600 dark:text-red-400">{trackError}</p>}
@@ -552,6 +662,9 @@ export function ProductBrowser({
 
       <div className="mt-8">
         {trackedGroups.length > 0 && (
+          <SummaryStrip trackedCount={trackedGroups.length} listingCount={products.length} dropCount={dropCount} />
+        )}
+        {trackedGroups.length > 0 && (
           <div className="flex items-center justify-between gap-2">
             <SectionLabel>Tracked / متابَع</SectionLabel>
             <div className="flex items-center gap-1 rounded-full bg-gray-100 p-0.5 text-[11px] font-medium dark:bg-white/5">
@@ -580,7 +693,12 @@ export function ProductBrowser({
         ) : (
           <div className="mt-4 grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
             {sortedTrackedGroups.map((group) => (
-              <TrackedProductGroupCard key={group.key} group={group} retailerSlugById={retailerSlugById} />
+              <TrackedProductGroupCard
+                key={group.key}
+                group={group}
+                retailerSlugById={retailerSlugById}
+                priceChange={priceChanges[group.items[0]!.id]}
+              />
             ))}
           </div>
         )}
