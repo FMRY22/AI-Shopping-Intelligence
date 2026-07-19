@@ -18,20 +18,9 @@ jobs:
             echo "=== query: $q ==="
             curl -sS -G "https://eshopping-ai.vercel.app/api/search" \
               --data-urlencode "q=$q" \
-              -w "\nHTTP_STATUS:%{http_code}\n" \
-              --max-time 30 | python3 -c "
-import json,sys
-raw = sys.stdin.read()
-try:
-    body, status = raw.rsplit('HTTP_STATUS:', 1)
-    data = json.loads(body)
-    products = data.get('products', [])
-    print(f'  {len(products)} result(s):')
-    for p in products[:8]:
-        print(f\"    - {p.get('title_en')}\")
-except Exception as e:
-    print('  (parse error)', e)
-    print(raw[:500])
-"
+              --max-time 30 > out.json
+            count=$(jq '.products | length' out.json)
+            echo "  $count result(s):"
+            jq -r '.products[]?.title_en // empty' out.json | sed 's/^/    - /'
             echo
           done
