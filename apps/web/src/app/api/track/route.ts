@@ -3,6 +3,7 @@ import { chromium as playwright } from "playwright-core";
 import chromium from "@sparticuz/chromium-min";
 import type { Browser, Locator, Page } from "playwright-core";
 import { parsePrice } from "@repo/shared";
+import { isRelevantToQuery } from "@/lib/product-groups";
 
 // POST /api/track (PRD.md FR-18/FR-1): the "search for anything" path.
 // GET /api/search only looks inside products we've already collected --
@@ -378,7 +379,19 @@ export async function POST(request: Request): Promise<NextResponse> {
 
   const errors = summary.filter((s) => s.status === "rejected").map((s) => `${s.retailer}: ${s.reason}`);
 
-  console.log("[track] summary", query, summary);
+  // Retailers' own search engines return "related"/upsell items beyond a
+  // literal match, not just what was typed -- founder feedback
+  // (2026-07-19): "iphone 17" came back with only ~4 correct groups among
+  // many wrong ones (iPhone 15 listings, a phone case whose title just
+  // mentions "for iPhone 17"). Filters the raw per-retailer results
+  // against the query itself before they ever reach clustering, so a
+  // near-miss never becomes its own comparison card (see
+  // isRelevantToQuery's comment in product-groups.ts for the matching
+  // rule). Summary/counts above stay as each retailer's raw find count --
+  // this only trims what's actually returned to the client.
+  const relevantResults = liveResults.filter((r) => isRelevantToQuery(r.title, searchQuery));
 
-  return NextResponse.json({ results: liveResults, ...(errors.length > 0 ? { partialErrors: errors } : {}) });
+  console.log("[track] summary", query, summary, `${relevantResults.length}/${liveResults.length} relevant`);
+
+  return NextResponse.json({ results: relevantResults, ...(errors.length > 0 ? { partialErrors: errors } : {}) });
 }

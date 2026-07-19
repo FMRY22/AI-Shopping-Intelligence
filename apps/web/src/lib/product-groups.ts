@@ -284,6 +284,38 @@ export function findMatchingGroupKey(title: string, existing: Product[]): string
   return null;
 }
 
+// Retailers' own search engines pad results with tangential items, not
+// just literal matches -- founder feedback (2026-07-19): searching
+// "iPhone 17" against live retailers returned only ~4 correct product
+// groups among many wrong ones (iPhone 15 listings pulled in as
+// "related", and a phone CASE whose title only mentions "for iPhone 17"
+// deep in marketing copy, e.g. "Techpick 4-in-1 Protection Pack ...
+// Smartphone Case Bundle, for iPhone 17, Clear"). clusterTitles below
+// only decides which raw results are the SAME product as each other --
+// it has no concept of whether a result actually matches what was
+// searched for, so every one of a retailer's upsell/near-miss results
+// became its own comparison card.
+//
+// Requires every query token to appear among a title's first
+// RELEVANCE_WINDOW tokens (the product-name prefix), not just anywhere
+// in the full text. This catches both failure modes: "wrong generation
+// number" (title's tokens don't contain "17" at all, e.g. "iPhone 15")
+// and "right words, wrong role" (a case/accessory's title mentions
+// "iPhone 17" only as which phone it fits, well past the window that
+// covers even a "Renewed Grade B Apple iPhone 17..." prefix in every
+// real listing seen so far).
+const RELEVANCE_WINDOW = 8;
+
+export function isRelevantToQuery(title: string, query: string): boolean {
+  const queryTokens = normalizeTitleTokens(query);
+  if (queryTokens.size === 0) return true;
+  const titleTokens = new Set([...normalizeTitleTokens(title)].slice(0, RELEVANCE_WINDOW));
+  for (const token of queryTokens) {
+    if (!titleTokens.has(token)) return false;
+  }
+  return true;
+}
+
 // Used on live (not-yet-tracked) search results -- founder feedback
 // (2026-07-19): typing "iPhone 16" showed everything (16, 16 Pro, 16 Pro
 // Max, different colors/storage across retailers) crammed into one
