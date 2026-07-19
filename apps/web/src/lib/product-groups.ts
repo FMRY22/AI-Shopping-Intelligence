@@ -59,6 +59,18 @@ export function groupProducts(products: Product[]): ProductGroup[] {
 // unit-less generation numbers like "iPhone 15" vs "14") to keep that
 // precision intact. Every veto still runs BEFORE the similarity threshold,
 // so a high score can never override a known conflict.
+//
+// Round 3 (same day, minutes after round 2 shipped): the backfill script
+// using round 2's logic wrongly merged a "Nintendo Switch 2 + Mario Kart
+// World Bundle" listing INTO the PS5 group on production. Cause: both
+// titles carry the same retailer boilerplate -- "Console", "2 Year
+// Manufacturer Warranty", "(KSA Version)" -- and overlap coefficient
+// divides by the SMALLER set size, so boilerplate dominating a short
+// title's token count alone was enough to cross the threshold even though
+// the two products share zero real product-identity words. STOPWORDS
+// strips that retailer/regional metadata before comparing -- it was never
+// signal about which PRODUCT this is, only about warranty terms and which
+// region's edition it's listed for.
 const OVERLAP_THRESHOLD = 0.5;
 
 // Canonicalizes retailer-specific abbreviations to a shared spelling before
@@ -66,12 +78,22 @@ const OVERLAP_THRESHOLD = 0.5;
 // (terse ones) produce the same token instead of two disjoint ones.
 const ALIAS_PATTERNS: [RegExp, string][] = [[/playstation\s*(\d)/g, "ps$1"]];
 
-// "Wi-Fi" vs "WiFi", "13-inch" vs "13 inch" -- retailers are inconsistent
-// about hyphens within a single logical word, so hyphens are joined (not
-// turned into a space break) before tokenizing, which also has the useful
-// side effect of turning model codes like "WH-1000XM5" into one token
-// ("wh1000xm5") that the trailing-digit conflict check below can compare.
+// "Wi-Fi" vs "WiFi", "13-inch" vs "13 inch", "Int'l" vs "International" --
+// retailers are inconsistent about hyphens and apostrophes within a single
+// logical word, so both are joined (not turned into a space break) before
+// tokenizing, which also has the useful side effect of turning model codes
+// like "WH-1000XM5" into one token ("wh1000xm5") that the trailing-digit
+// conflict check below can compare.
 const TOKEN_SYNONYMS: Record<string, string> = { generation: "gen", dig: "digital" };
+
+// Retailer/regional metadata that shows up verbatim across unrelated
+// products' titles -- warranty terms and "which region's edition" markers,
+// never the product itself. Left in the token set, these can single-
+// handedly drag two different products' overlap score above the threshold
+// (see round 3 above).
+const STOPWORDS = new Set([
+  "warranty", "manufacturer", "year", "years", "ksa", "international", "intl", "global", "gcc", "console",
+]);
 
 function preprocessTitle(title: string): string {
   let normalized = title.toLowerCase();
@@ -79,7 +101,8 @@ function preprocessTitle(title: string): string {
   // "825 GB" -> "825gb", matching however extractSizeByUnit already reads it,
   // so the tokenizer doesn't split what the size-conflict check treats as one value.
   normalized = normalized.replace(/(\d)\s+(gb|tb|mp|mah|inch)\b/g, "$1$2");
-  return normalized.replace(/-/g, "");
+  normalized = normalized.replace(/-/g, "");
+  return normalized.replace(/'/g, "");
 }
 
 function normalizeTitleTokens(title: string): Set<string> {
@@ -89,7 +112,8 @@ function normalizeTitleTokens(title: string): Set<string> {
       .replace(/[^\p{L}\p{N}\s]/gu, " ")
       .split(/\s+/)
       .filter(Boolean)
-      .map((token) => TOKEN_SYNONYMS[token] || token),
+      .map((token) => TOKEN_SYNONYMS[token] || token)
+      .filter((token) => !STOPWORDS.has(token)),
   );
 }
 
